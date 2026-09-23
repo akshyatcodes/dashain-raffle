@@ -41,6 +41,8 @@ catch (e) { if (e.code !== "ENOENT") { console.error("cannot read", DB_FILE, e.m
 // sales window, self-issue and payment collectors (added after launch; fill in on older data files)
 db.config.salesCloseAt ??= null;
 db.config.selfIssue = { enabled: false, code: "", holdHours: 48, maxPer: 21, ...(db.config.selfIssue || {}) };
+// company code: prices and payment collectors are hidden from the public board until a visitor enters it (empty = no gate)
+db.config.companyCode ??= "ODIN2082";
 db.config.collectors ??= [{ id: "c-finance", name: "Finance team", kind: "finance", methods: ["Cash", "eSewa", "Khalti", "Bank transfer"], note: "", qr: null }];
 // pricing: bundles[] is the price list; `price` mirrors the 1-ticket tier. Older sales keep what they were charged.
 if (!Array.isArray(db.config.bundles) || !db.config.bundles.length) db.config.bundles = [{ qty: 1, price: +db.config.price || 0 }];
@@ -134,10 +136,23 @@ function checkLimits(buyer, count) {
   }
 }
 
-function publicState() {
+const codeSig = code => crypto.createHmac("sha256", SESSION_SECRET).update("cc:" + String(code || "").trim().toLowerCase()).digest("base64url");
+const gateOn = () => !!(db.config.companyCode || "").trim();
+// a visitor is unlocked when their `rc` cookie is the signature of the CURRENT code (changing the code re-locks everyone) or they are signed in
+function unlocked(req) {
+  if (!gateOn()) return true;
+  if (readSession(req)) return true;
+  const m = (req.headers.cookie || "").match(/(?:^|;\s*)rc=([^;]+)/); if (!m) return false;
+  const a = Buffer.from(m[1]), b = Buffer.from(codeSig(db.config.companyCode));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function publicState(req, force = false) {
+  const open = force || unlocked(req), { companyCode, ...cfg } = db.config;
+  const config = { ...cfg, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) };
+  if (!open) { delete config.bundles; delete config.price; config.collectors = []; }
   return {
-    version: db.version, prizes: db.prizes, salesOpen: salesOpen(),
-    config: { ...db.config, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) },
+    version: db.version, prizes: db.prizes, salesOpen: salesOpen(), locked: !open, gated: gateOn(),
+    config,
     sales: liveSales().map(s => ({ id: s.id, name: publicName(s), dept: s.anon ? "" : s.dept, nums: s.nums, paid: s.paid, at: s.at })),
     draws: db.draws.map(d => { const s = saleFor(d.ticket); return { id: d.id, prizeId: d.prizeId, prizeName: d.prizeName, ticket: d.ticket, name: s ? publicName(s) : "—", dept: s && !s.anon ? s.dept : "", at: d.at }; }),
     stage: stagePublic(), inDraw: eligible().length,
@@ -285,6 +300,12 @@ const actions = {
       drawAt: b.drawAt && !isNaN(Date.parse(b.drawAt)) ? new Date(b.drawAt).toISOString() : null, publicUrl: str(b.publicUrl, 80) || c.publicUrl,
       salesCloseAt: b.salesCloseAt && !isNaN(Date.parse(b.salesCloseAt)) ? new Date(b.salesCloseAt).toISOString() : null,
     });
+    if (b.companyCode !== undefined) {
+      const code = str(b.companyCode, 40);
+      if (code !== (c.companyCode || "")) financeOnly(who, "change the company code");
+      if (code && code.length < 4) throw bad("The company code needs at least 4 characters, or leave it blank to show prices to everyone");
+      c.companyCode = code;
+    }
     if (b.selfIssue) {
       const si = b.selfIssue, code = str(si.code, 40);
       if (si.enabled && code.length < 4) throw bad("Set an access code of at least 4 characters before opening self-service");
@@ -424,7 +445,7 @@ const server = http.createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/")) return serveStatic(req, res);
 
     const session = readSession(req);
-    if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, publicState());
+    if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, publicState(req));
     if (req.method === "GET" && url.pathname === "/api/receipt") {
       const s = db.sales.find(x => x.token && x.token === url.searchParams.get("t"));
       return s ? send(res, 200, { receipt: receiptOf(s) }) : send(res, 404, { error: "Receipt not found" });
@@ -451,6 +472,13 @@ const server = http.createServer(async (req, res) => {
       const name = str(b.name, 40) || "Organiser";
       audit(name, `signed in (${role})`); save();
       return send(res, 200, { admin: true, name, role }, { "set-cookie": `rs=${makeSession(name, role)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}` });
+    }
+    if (url.pathname === "/api/unlock") {
+      const b = await body(req), code = String(b.code || "").trim().toLowerCase();
+      if (!gateOn()) return send(res, 200, { ok: true, ...publicState(req) });
+      const want = crypto.createHash("sha256").update(db.config.companyCode.trim().toLowerCase()).digest();
+      if (!code || !crypto.timingSafeEqual(crypto.createHash("sha256").update(code).digest(), want)) { selfRate(req, 20); return send(res, 403, { error: "That company code isn't right. Ask your organiser or check the company channel." }); }
+      return send(res, 200, { ok: true, ...publicState(req, true) }, { "set-cookie": `rc=${codeSig(db.config.companyCode)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${30 * 86400}` });
     }
     if (url.pathname === "/api/self/issue") return send(res, 200, { ok: true, ...selfService.issue(await body(req), req) });
     if (url.pathname === "/api/self/claim") return send(res, 200, { ok: true, ...selfService.claim(await body(req), req) });

@@ -63,6 +63,11 @@
           <div class="stat"><span class="eyebrow">One ticket's chance</span><b class="num" id="stOdds">—</b><span class="sub">of winning something</span></div>
           <div class="stat"><span class="eyebrow">Best deal</span><b class="num" id="stPrice">—</b><span class="sub" id="stPriceSub">per ticket</span></div>
           <div class="tiers" id="tiers" aria-label="Ticket prices"></div>
+          <form class="unlock" id="unlockHero" hidden autocomplete="off">
+            <div><span class="eyebrow">Company code</span><p class="hint">Ticket prices and who to pay are shown once you enter the code shared on the company channel.</p></div>
+            <div class="unlock-row"><input type="text" id="ucHero" maxlength="40" placeholder="Enter company code" aria-label="Company code" required><button class="btn primary" type="submit">Show prices</button></div>
+            <div class="err" id="ucHeroErr" role="alert"></div>
+          </form>
           <div class="stat cap" id="capBox" hidden><div class="calc-row"><span class="eyebrow">Tickets left</span><span class="num mono" id="capTxt"></span></div><div class="bar"><i id="capBar" style="width:0"></i></div></div>
         </div>
       </div>
@@ -144,6 +149,11 @@
         <div class="upsell" id="bHint" hidden></div>
         <div class="err" id="bErr" role="alert"></div>
         <button class="btn primary" type="submit" id="bSubmit">Reserve my tickets</button>
+      </form>
+      <form class="panel unlock" id="unlockBuy" hidden autocomplete="off">
+        <div><div class="eyebrow">Company code</div><h2>Enter your company code</h2><p class="hint">Prices and payment details are only shown to staff. The code is shared on the company channel; ask an organiser if you don't have it.</p></div>
+        <div class="unlock-row"><input type="text" id="ucBuy" maxlength="40" placeholder="Company code" aria-label="Company code" required><button class="btn primary" type="submit">Continue</button></div>
+        <div class="err" id="ucBuyErr" role="alert"></div>
       </form>
       <div class="panel receipt" id="receipt" hidden></div>
       <div class="panel closed-note" id="buyClosed" hidden></div>
@@ -333,6 +343,11 @@
           <label class="f">Web address printed on tickets<input type="text" id="cUrl" maxlength="80"></label>
           <label class="f">Ticket sales close (Nepal time, blank = until the draw)<input type="datetime-local" id="cClose"></label>
         </div>
+        <fieldset class="bundles fin">
+          <legend>Company code</legend>
+          <p class="hint">Ticket prices and payment collectors stay hidden on the public site until a visitor enters this code. Changing it locks everyone out again until they re-enter it. Leave blank to show prices to everyone.</p>
+          <label class="f" style="max-width:260px">Company code<input type="text" id="cCompany" maxlength="40" autocomplete="off"></label>
+        </fieldset>
         <fieldset class="bundles">
           <legend>Self-service tickets</legend>
           <p class="hint">Let staff reserve tickets from this site and pay a collector. Reservations stay out of the draw until finance confirms the payment, and unpaid ones lapse after the hold time.</p>

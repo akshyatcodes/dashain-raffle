@@ -29,6 +29,7 @@ Do this signed in as **finance**.
    - **Chat link (optional):** a Slack, Teams or `mailto:` link. It shows as a button on the buyer's receipt.
    - **QR code:** save the collector first, then upload their eSewa, Khalti or bank QR (PNG, JPG or WebP, under 2 MB).
 5. **Settings → Self-service** (optional):
+   - **Company code** (finance only): ticket prices and payment collectors are hidden on the public site until a visitor enters this code. It is remembered on their device for 30 days; changing the code locks everyone out again. Leave it blank to show prices to everyone. The site ships with the test code `ODIN2082`, so change it before launch.
    - Tick **Open self-service** and set an **access code**. Share the code on the company channel, not publicly.
    - **Hold time:** how long an unpaid reservation is kept before it lapses. Default 48 hours.
    - **Most tickets in one reservation:** default 21.

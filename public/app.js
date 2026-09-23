@@ -121,8 +121,10 @@ function renderBoard(){
   $("stPrizes").textContent = prizeQty();
   $("stPrizesSub").textContent = S.pub.draws.length ? `${P} still to be won` : "to be won";
   $("stOdds").textContent = N && P ? pct(pWin(1, N, P)) : "—";
-  const bd = bestDeal(), bs = bundles();
-  if (bd){ $("stPrice").textContent = `${bd.qty} for ${Number(bd.price).toLocaleString("en-IN")}`; $("stPriceSub").textContent = `${money(Math.round(bd.price / bd.qty))} a ticket` + (bs[0].qty === 1 ? ` · save ${money(bs[0].price * bd.qty - bd.price)}` : ""); }
+  const bd = bestDeal(), bs = bundles(), locked = !!S.pub.locked;
+  $("unlockHero").hidden = !locked; $("stPrice").parentElement.classList.toggle("locked", locked);
+  if (locked){ $("stPrice").textContent = "Code needed"; $("stPriceSub").textContent = "enter the company code below"; }
+  else if (bd){ $("stPrice").textContent = `${bd.qty} for ${Number(bd.price).toLocaleString("en-IN")}`; $("stPriceSub").textContent = `${money(Math.round(bd.price / bd.qty))} a ticket` + (bs[0].qty === 1 ? ` · save ${money(bs[0].price * bd.qty - bd.price)}` : ""); }
   else { $("stPrice").textContent = bs[0] ? money(bs[0].price) : "—"; $("stPriceSub").textContent = "per ticket"; }
   $("tiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" class="tier ${bd && b.qty === bd.qty ? "best" : ""}" data-q="${b.qty}"><span class="q">${b.qty} ticket${b.qty > 1 ? "s" : ""}</span><span class="p">${esc(money(b.price))}</span><span class="e">${b.qty > 1 ? esc(money(Math.round(b.price / b.qty))) + " each" : "single"}</span></button>`).join("") : "";
   $("calcTiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" data-q="${b.qty}" aria-pressed="false">${b.qty} · ${esc(money(b.price))}</button>`).join("") : "";
@@ -335,11 +337,12 @@ function fillSettings(){
   const npt = iso => iso ? new Date(new Date(iso).getTime() + 345 * 60000).toISOString().slice(0, 16) : "";
   $("cDraw").value = npt(c.drawAt); $("cClose").value = npt(c.salesCloseAt);
   const si = (S.adm?.config || c).selfIssue || {};
+  $("cCompany").value = S.adm?.config?.companyCode ?? "";
   $("siOn").checked = !!si.enabled; $("siCode").value = si.code || ""; $("siHold").value = si.holdHours || 48; $("siMax").value = si.maxPer || 21;
 }
 $("sub-settings").onsubmit = e => {
   e.preventDefault(); const v = $("cDraw").value;
-  act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows()} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
+  act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows(), companyCode:$("cCompany").value} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
     cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null,
     salesCloseAt:$("cClose").value ? $("cClose").value + ":00+05:45" : null,
     selfIssue:{enabled:$("siOn").checked, code:$("siCode").value, holdHours:$("siHold").value, maxPer:$("siMax").value}}, "Settings saved");
@@ -753,17 +756,34 @@ function fillCollectorSelect(colId, methId){
 $("sCollector").onchange = () => fillCollectorSelect("sCollector", "sMethod");
 $("pCollector").onchange = () => fillCollectorSelect("pCollector", "pMethod");
 
+/* ---------------- company-code gate ---------------- */
+async function unlock(inputId, errId, btn){
+  $(errId).textContent = ""; const code = $(inputId).value.trim(); if (!code) return;
+  btn.disabled = true;
+  try {
+    await api("/api/unlock", {code});
+    try { localStorage.setItem("raffle.code", code); } catch {}
+    if (!$("bCode").value) $("bCode").value = code;
+    await load(); toast("Prices and payment details unlocked");
+  } catch (e){ $(errId).textContent = e.message; }
+  finally { btn.disabled = false; }
+}
+$("unlockHero").onsubmit = e => { e.preventDefault(); unlock("ucHero", "ucHeroErr", e.submitter || $("unlockHero").querySelector("button")); };
+$("unlockBuy").onsubmit = e => { e.preventDefault(); unlock("ucBuy", "ucBuyErr", e.submitter || $("unlockBuy").querySelector("button")); };
+
 /* ---------------- self-service ---------------- */
 S.receiptToken = new URLSearchParams(location.search).get("r"); S.receipt = null;
 try { $("bCode").value = localStorage.getItem("raffle.code") || ""; } catch {}
 let buyCollector = null;
 function renderBuy(){
   const open = salesOpen(), on = selfOn(), closed = $("buyClosed");
-  if (S.receiptToken){ $("buyForm").hidden = true; closed.hidden = true; renderReceipt(); return; }
+  if (S.receiptToken){ $("buyForm").hidden = true; $("unlockBuy").hidden = true; closed.hidden = true; renderReceipt(); return; }
   $("receipt").hidden = true;
-  if (!on || !open){ $("buyForm").hidden = true; closed.hidden = false;
+  if (!on || !open){ $("buyForm").hidden = true; $("unlockBuy").hidden = true; closed.hidden = false;
     closed.innerHTML = `<h2>${open ? "Self-service isn't open" : "Ticket sales have closed"}</h2><p class="hint">${open ? "Buy your tickets from an organiser or the finance team." : "Thanks to everyone who took part. Watch the live draw on the Draw stage."}</p>`; return; }
-  closed.hidden = true; $("buyForm").hidden = false;
+  closed.hidden = true;
+  $("unlockBuy").hidden = !S.pub.locked; $("buyForm").hidden = !!S.pub.locked;
+  if (S.pub.locked) return;
   const bs = bundles(), max = cfg().selfIssue?.maxPer || 21;
   $("bCount").max = max;
   const tHtml = bs.map(b => `<button type="button" data-q="${b.qty}" aria-pressed="false"><b>${b.qty} ticket${b.qty > 1 ? "s" : ""}</b><span>${esc(money(b.price))}${b.qty > 1 ? " · " + esc(money(Math.round(b.price / b.qty))) + " each" : ""}</span></button>`).join("");

@@ -432,3 +432,11 @@ body.is-finance .org-only{display:none!important}
   .slip .n{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:17pt;line-height:1;color:#C4122F}
   .slip .b{font-size:8pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 }
+
+/* company-code gate */
+.unlock{grid-column:1/-1;background:var(--paper);border:1px dashed var(--line);border-radius:16px;padding:14px 16px;display:grid;gap:10px}
+.unlock .hint{margin:4px 0 0}
+.unlock-row{display:flex;gap:8px;flex-wrap:wrap}
+.unlock-row input{flex:1 1 180px;min-width:0;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;background:var(--paper-2,var(--paper));color:inherit;text-transform:uppercase;letter-spacing:.06em}
+.unlock.panel{border-style:solid}
+.stat.locked b{font-size:1.2rem;padding-top:6px}
