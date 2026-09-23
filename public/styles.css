@@ -139,7 +139,7 @@ section.block{margin-top:36px}
 
 /* forms */
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.85rem;font-weight:600;color:var(--ink-2)}
-input[type=text],input[type=number],input[type=search],input[type=datetime-local],select{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:.98rem;color:var(--ink);width:100%}
+input[type=text],input[type=number],input[type=search],input[type=datetime-local],input[type=tel],input[type=password],select{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:.98rem;color:var(--ink);width:100%}
 input:focus,select:focus{outline:2px solid color-mix(in srgb,var(--kite) 50%,transparent);border-color:var(--kite)}
 .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form{display:flex;flex-direction:column;gap:12px}
@@ -189,7 +189,8 @@ th{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink
 tr:last-child td{border-bottom:0}
 tr.void td{color:var(--ink-3);text-decoration:line-through}
 tr.void td.acts{text-decoration:none}
-td.acts{display:flex;gap:6px}
+td.acts{white-space:nowrap}
+td.acts .btn + .btn{margin-left:6px}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 .toolbar input{max-width:260px}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
@@ -363,3 +364,52 @@ body.is-finance .org-only{display:none!important}
 .pb.done{opacity:.92}
 .pb.now{outline:2px solid var(--tika);outline-offset:2px}
 @media (max-width:640px){.pb{grid-template-columns:36px 1fr}.pb .ws{grid-column:1/-1;justify-content:flex-start}}
+
+/* ---- sales window + CTA ---- */
+.cd-label{margin-top:18px;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--tika);font-weight:700}
+.cd-label + .countdown{margin-top:6px}
+.close-when{margin-top:4px;font-size:.9rem;color:var(--ink-2)}
+.close-when.shut{color:var(--tika);font-weight:600}
+.cta{margin-top:16px;padding:12px 22px;font-size:1.02rem;border-radius:14px}
+.tab-buy{color:var(--tika)}
+.tab-buy[aria-selected="true"]{background:var(--tika);color:#fff}
+.subtab .count{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:99px;background:var(--tika);color:#fff;font-size:.72rem;margin-left:4px;padding:0 5px}
+.subtab[aria-selected="true"] .count{background:#fff;color:var(--tika)}
+
+/* ---- self-service ---- */
+.buy-wrap{display:grid;grid-template-columns:1fr;gap:20px;max-width:720px;margin-inline:auto}
+.buy-tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:8px}
+.buy-tiers button{border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:8px 10px;text-align:left;cursor:pointer;font:inherit;color:inherit;display:flex;flex-direction:column}
+.buy-tiers button b{font-family:var(--mono);font-size:1.1rem}
+.buy-tiers button span{font-size:.78rem;color:var(--ink-3)}
+.buy-tiers button[aria-pressed="true"]{border-color:var(--tika);background:var(--tika-soft)}
+.collectors{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+.collectors label{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;font-weight:500;color:var(--ink)}
+.collectors label:has(input:checked){border-color:var(--tika);background:var(--tika-soft)}
+.collectors input{accent-color:var(--tika);margin-top:4px}
+.collectors .cn{font-weight:700}
+.collectors .cm{font-size:.8rem;color:var(--ink-3)}
+.receipt{display:flex;flex-direction:column;gap:14px}
+.receipt .status{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pay-box{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;background:var(--paper-2);border-radius:14px;padding:14px}
+.pay-box img{width:170px;height:170px;object-fit:contain;background:#fff;border-radius:10px;border:1px solid var(--line)}
+.pay-box .amt{font-family:var(--mono);font-size:1.8rem;font-weight:600}
+.pay-box .ref{font-family:var(--mono);background:var(--paper);border:1px dashed var(--line);border-radius:8px;padding:2px 8px}
+.claim{display:flex;gap:8px;flex-wrap:wrap}
+.claim input{flex:1;min-width:160px}
+.closed-note h2{margin-bottom:6px}
+@media (max-width:860px){.buy-wrap{grid-template-columns:1fr}}
+@media (max-width:520px){.pay-box{grid-template-columns:1fr}.pay-box img{width:100%;height:auto;max-width:260px}}
+
+/* ---- collectors editor ---- */
+.col-rows{display:flex;flex-direction:column;gap:12px}
+.col-row{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;grid-template-columns:1fr 150px;gap:10px 14px}
+.col-row .meth{grid-column:1/-1;display:flex;gap:6px 14px;flex-wrap:wrap}
+.col-row .qr{grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.col-row .qr img{width:84px;height:84px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px}
+.col-row .qr .none{width:84px;height:84px;display:grid;place-items:center;border:1px dashed var(--line);border-radius:8px;font-size:.75rem;color:var(--ink-3);text-align:center}
+@media (max-width:520px){.col-row{grid-template-columns:1fr}}
+.tab{white-space:nowrap}
+@media (max-width:520px){.tabs{overflow-x:auto;scrollbar-width:none}.tab{padding:6px 8px;font-size:.84rem}}
+.col-row{grid-template-columns:1fr 200px}
+@media (max-width:520px){.col-row{grid-template-columns:1fr}}

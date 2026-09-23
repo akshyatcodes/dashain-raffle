@@ -23,6 +23,7 @@
     <span class="live-dot off" id="liveDot"><i></i><span id="liveTxt">Connecting…</span></span>
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button class="tab" role="tab" id="tab-board" data-tab="board" aria-selected="true">Live board</button>
+      <button class="tab tab-buy" role="tab" id="tab-buy" data-tab="buy" aria-selected="false" hidden>Get tickets</button>
       <button class="tab" role="tab" id="tab-draw" data-tab="draw" aria-selected="false">Draw stage</button>
       <button class="tab" role="tab" id="tab-manage" data-tab="manage" aria-selected="false">Organisers</button>
     </nav>
@@ -45,6 +46,7 @@
           <div class="greet">शुभ विजया दशमी</div>
           <h1 id="heroTitle">Dashain Raffle</h1>
           <p class="lede" id="heroLede">Buy a ticket, fly a kite, win something. Every paid ticket gets an equal chance at every prize.</p>
+          <div class="cd-label" id="cdLabel">Live draw in</div>
           <div class="countdown" id="countdown" aria-live="off">
             <div class="cd"><b id="cdD">--</b><span>days</span></div>
             <div class="cd"><b id="cdH">--</b><span>hrs</span></div>
@@ -52,6 +54,8 @@
             <div class="cd"><b id="cdS">--</b><span>sec</span></div>
           </div>
           <div class="draw-when" id="drawWhen">Draw date to be announced</div>
+          <div class="close-when" id="closeWhen" hidden></div>
+          <button type="button" class="btn primary cta" id="heroCta" hidden>Get your tickets</button>
         </div>
         <div class="stats">
           <div class="stat hot"><span class="eyebrow">Tickets in the draw</span><b class="num" id="stTickets">0</b><span class="sub" id="stTicketsSub">paid &amp; confirmed</span></div>
@@ -114,6 +118,38 @@
     </section>
   </div>
 
+  <!-- ================= SELF-SERVICE ================= -->
+  <div id="view-buy" hidden>
+    <section class="block buy-wrap">
+      <form class="panel form" id="buyForm" autocomplete="on">
+        <div>
+          <div class="eyebrow">Self-service</div>
+          <h2>Get your raffle tickets</h2>
+          <p class="hint" id="buyIntro">Reserve your numbers now, then pay the collector you pick. Your tickets enter the draw as soon as finance confirms the payment.</p>
+        </div>
+        <label class="f">Access code<input type="text" id="bCode" required autocomplete="off" placeholder="Shared on the company channel"></label>
+        <div class="frow">
+          <label class="f">Your full name<input type="text" id="bName" required maxlength="80" autocomplete="name"></label>
+          <label class="f">Team<input type="text" id="bDept" list="deptList" maxlength="40"></label>
+        </div>
+        <label class="f">Phone (optional, so the collector can reach you)<input type="tel" id="bPhone" maxlength="20" autocomplete="tel"></label>
+        <div class="f"><span>How many tickets</span>
+          <div class="buy-tiers" id="buyTiers"></div>
+          <div class="stepper" style="max-width:190px"><button type="button" id="bMinus" aria-label="One fewer">−</button><input type="number" id="bCount" min="1" value="3" aria-label="Ticket count"><button type="button" id="bPlus" aria-label="One more">+</button></div>
+        </div>
+        <div class="f"><span>Pay to</span><div class="collectors" id="buyCollectors"></div></div>
+        <label class="f">Payment method<select id="bMethod"></select></label>
+        <label class="check"><input type="checkbox" id="bAnon"> Keep my name off the public board</label>
+        <div class="total"><span>You'll pay <small class="brk" id="bBreak"></small></span><b class="num" id="bTotal">—</b></div>
+        <div class="upsell" id="bHint" hidden></div>
+        <div class="err" id="bErr" role="alert"></div>
+        <button class="btn primary" type="submit" id="bSubmit">Reserve my tickets</button>
+      </form>
+      <div class="panel receipt" id="receipt" hidden></div>
+      <div class="panel closed-note" id="buyClosed" hidden></div>
+    </section>
+  </div>
+
   <!-- ================= DRAW ================= -->
   <div id="view-draw" hidden>
     <div class="stage" id="stage">
@@ -160,7 +196,9 @@
         <button class="subtab" data-sub="ledger" aria-selected="false">Sales ledger</button>
         <button class="subtab" data-sub="prizes" aria-selected="false">Prizes</button>
         <button class="subtab" data-sub="settings" aria-selected="false">Settings</button>
+        <button class="subtab fin" data-sub="collectors" aria-selected="false">Collectors</button>
         <button class="subtab" data-sub="results" aria-selected="false">Draw results</button>
+        <button class="subtab fin" data-sub="payments" aria-selected="false">Payments <span class="count" id="payCount" hidden></span></button>
       </div>
 
       <div id="sub-sell" class="grid2">
@@ -175,9 +213,15 @@
             <label class="f">How many tickets
               <div class="stepper"><button type="button" id="sMinus" aria-label="One fewer">−</button><input type="number" id="sCount" min="1" max="100" value="1" aria-label="Ticket count"><button type="button" id="sPlus" aria-label="One more">+</button></div>
             </label>
-            <label class="f">Payment method
-              <select id="sMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
+            <label class="f">Pay to
+              <select id="sCollector"></select>
             </label>
+          </div>
+          <div class="frow">
+            <label class="f">Payment method
+              <select id="sMethod"></select>
+            </label>
+            <span></span>
           </div>
           <label class="check fin"><input type="checkbox" id="sPaid" checked> Payment received (only paid tickets enter the draw)</label>
           <p class="hint org-only">Finance confirms the payment. Tickets enter the draw once they're marked paid.</p>
@@ -219,9 +263,10 @@
             <label class="f">Buyer name<input type="text" id="pBuyer" required maxlength="80"></label>
             <label class="f">Team<input type="text" id="pDept" list="deptList" maxlength="40"></label>
           </div>
-          <label class="f">Payment method
-            <select id="pMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
-          </label>
+          <div class="frow">
+            <label class="f">Pay to<select id="pCollector"></select></label>
+            <label class="f">Payment method<select id="pMethod"></select></label>
+          </div>
           <label class="check fin"><input type="checkbox" id="pPaid" checked> Payment received</label>
           <p class="hint org-only">Hand the cash to finance. They'll mark these tickets paid.</p>
           <label class="check"><input type="checkbox" id="pAnon"> Keep buyer's name off the public board</label>
@@ -275,9 +320,41 @@
           <label class="f">Ticket limit (0 = no limit)<input type="number" id="cCap" min="0" step="1"></label>
           <label class="f">Max per person (0 = no limit)<input type="number" id="cPer" min="0" step="1"></label>
         </div>
-        <label class="f">Web address printed on tickets<input type="text" id="cUrl" maxlength="80"></label>
+        <div class="frow">
+          <label class="f">Web address printed on tickets<input type="text" id="cUrl" maxlength="80"></label>
+          <label class="f">Ticket sales close (Nepal time, blank = until the draw)<input type="datetime-local" id="cClose"></label>
+        </div>
+        <fieldset class="bundles">
+          <legend>Self-service tickets</legend>
+          <p class="hint">Let staff reserve tickets from this site and pay a collector. Reservations stay out of the draw until finance confirms the payment, and unpaid ones lapse after the hold time.</p>
+          <label class="check"><input type="checkbox" id="siOn"> Open self-service</label>
+          <div class="frow">
+            <label class="f">Access code (share it on the company channel)<input type="text" id="siCode" maxlength="40" autocomplete="off"></label>
+            <label class="f">Hold unpaid reservations for (hours)<input type="number" id="siHold" min="1" max="336"></label>
+          </div>
+          <label class="f" style="max-width:260px">Most tickets in one reservation<input type="number" id="siMax" min="1" max="100"></label>
+        </fieldset>
         <div><button class="btn primary" type="submit">Save settings</button></div>
       </form>
+
+      <div id="sub-collectors" class="panel form fin" hidden>
+        <h2>Payment collectors</h2>
+        <p class="hint">Who buyers pay: the finance team or a designated person. Each collector can have their own methods and a payment QR, which is shown to buyers when they pick them.</p>
+        <div id="colRows" class="col-rows"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="addCol">Add a collector</button><button type="button" class="btn primary" id="saveCols">Save collectors</button></div>
+      </div>
+
+      <div id="sub-payments" class="panel fin" hidden>
+        <div class="sec-head"><h2>Payments to confirm</h2><p>Check the money arrived, then confirm. Confirmed tickets enter the draw.</p></div>
+        <div class="toolbar">
+          <select id="payF" aria-label="Collector" style="width:auto"></select>
+          <label class="check"><input type="checkbox" id="payClaimed"> Only buyers who say they've paid</label>
+        </div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Tickets</th><th>Buyer</th><th>Amount</th><th>Pay to</th><th>Reference</th><th>Source</th><th>Waiting</th><th></th></tr></thead>
+          <tbody id="payBody"></tbody>
+        </table></div>
+      </div>
 
       <div id="sub-results" class="panel" hidden>
         <div class="sec-head"><h2>Draw results</h2><p>Remove a result to redraw that prize, for example if the winner can't be reached.</p></div>

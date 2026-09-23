@@ -56,11 +56,11 @@ const partsText = parts => (parts || []).map(p => `${p.times > 1 ? p.times + " �
 const saleAmount = s => s.amount ?? s.nums.length * (s.price ?? cfg().price ?? 0);
 const bestDeal = () => { const bs = bundles(); if (bs.length < 2) return null; return bs.reduce((a, b) => b.price / b.qty < a.price / a.qty ? b : a); };
 const priceLine = () => bundles().map(b => b.qty === 1 ? `${money(b.price)} each` : `${b.qty} for ${Number(b.price).toLocaleString("en-IN")}`).join(" · ");
-function upsell(n){ // smallest nudge up to +3 tickets that's free or cheaper than singles
+function upsell(n, buyer){ // smallest nudge up to +3 tickets that's free or cheaper than singles
   const base = priceFor(n), single = bundles()[0]?.price || 0; if (!base) return null;
   for (let m = n + 1; m <= n + 3; m++){ const p = priceFor(m); if (!p) continue;
     const extra = p.amount - base.amount;
-    if (extra <= 0) return {m, extra:0, text:`<b>${m} tickets cost the same as ${n}.</b> Give them ${m - n} free?`};
+    if (extra <= 0) return {m, extra:0, text:`<b>${m} tickets cost the same as ${n}.</b> ${buyer ? `Get ${m - n} free?` : `Give them ${m - n} free?`}`};
     if (single && extra < (m - n) * single && m - n === 1) return {m, extra, text:`One more ticket is only <b>${money(extra)}</b> (${partsText(p.parts)}).`}; }
   return null;
 }
@@ -84,18 +84,21 @@ const oneIn = p => p > 0 ? "1 in " + Math.max(1, Math.round(1 / p)).toLocaleStri
 function setTab(t){
   S.tab = t;
   for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", b.dataset.tab === t);
-  for (const v of ["board","draw","manage"]) $("view-" + v).hidden = v !== t;
+  for (const v of ["board","buy","draw","manage"]) $("view-" + v).hidden = v !== t;
+  if (t === "buy") renderBuy();
   try { history.replaceState(null, "", "#" + t); } catch {}
   renderTicker();
   if (t === "draw") requestAnimationFrame(() => stageSky.size());
   if (t === "board") requestAnimationFrame(() => heroSky.size());
 }
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => setTab(b.dataset.tab));
-addEventListener("hashchange", () => { const h = location.hash.replace("#", ""); if (["board","draw","manage"].includes(h) && h !== S.tab) setTab(h); });
+addEventListener("hashchange", () => { const h = location.hash.replace("#", ""); if (["board","buy","draw","manage"].includes(h) && h !== S.tab) setTab(h); });
 function setSub(t){
   S.sub = t;
   for (const b of document.querySelectorAll(".subtab")) b.setAttribute("aria-selected", b.dataset.sub === t);
-  for (const v of ["sell","paper","ledger","prizes","settings","results"]) $("sub-" + v).hidden = v !== t;
+  for (const v of ["sell","paper","ledger","prizes","settings","collectors","payments","results"]) $("sub-" + v).hidden = v !== t;
+  if (t === "collectors"){ colDirty = false; renderCollectors(true); }
+  if (t === "payments") renderPayments();
   if (t === "settings") fillSettings();
 }
 document.querySelectorAll(".subtab").forEach(b => b.onclick = () => setSub(b.dataset.sub));
@@ -199,14 +202,30 @@ function renderLookup(){
 }
 $("lookupQ").oninput = renderLookup;
 
+const salesOpen = () => !cfg().salesCloseAt || Date.now() < Date.parse(cfg().salesCloseAt);
+const selfOn = () => !!cfg().selfIssue?.enabled;
+function renderWindow(){
+  const c = cfg(), open = salesOpen();
+  const cw = $("closeWhen"); cw.hidden = !c.salesCloseAt;
+  cw.textContent = open ? `Ticket sales close ${fmtDate(c.salesCloseAt)} (NPT)` : "Ticket sales have closed. Good luck in the draw!";
+  cw.classList.toggle("shut", !open);
+  $("cdLabel").textContent = open && c.salesCloseAt ? "Ticket sales close in" : "Live draw in";
+  $("heroCta").hidden = !(selfOn() && open);
+  $("tab-buy").hidden = !selfOn();
+}
 function tick(){
-  const t = cfg().drawAt ? new Date(cfg().drawAt) - Date.now() : NaN;
+  const target = salesOpen() && cfg().salesCloseAt ? cfg().salesCloseAt : cfg().drawAt;
+  if (tick._open !== undefined && tick._open !== salesOpen()){ renderWindow(); if (S.tab === "buy") renderBuy(); }
+  tick._open = salesOpen();
+  const t = target ? new Date(target) - Date.now() : NaN;
   const set = (id, v) => { const e = $(id), s = String(v).padStart(2, "0"); if (e.textContent !== s) e.textContent = s; };
   if (isNaN(t)){ ["cdD","cdH","cdM","cdS"].forEach(i => $(i).textContent = "--"); return; }
   const x = Math.max(0, t / 1000);
   set("cdD", Math.floor(x / 86400)); set("cdH", Math.floor(x % 86400 / 3600)); set("cdM", Math.floor(x % 3600 / 60)); set("cdS", Math.floor(x % 60));
 }
 setInterval(tick, 1000);
+
+$("heroCta").onclick = () => setTab("buy");
 
 /* ---------------- auth ---------------- */
 function renderAuth(){
@@ -234,6 +253,8 @@ function renderManage(){
   $("kOweBox").classList.toggle("alert", oweAmt > 0);
   $("kBuyers").textContent = new Set(live.map(s => s.buyer.toLowerCase())).size;
   renderLedger(); renderPrizeEditor(); renderResults(); renderBooks(); updateTotal(); updatePaperTotal();
+  fillCollectorSelect("sCollector", "sMethod"); fillCollectorSelect("pCollector", "pMethod");
+  renderPayments(); if (S.sub === "collectors") renderCollectors();
   if (!S.lastIssued) renderTicket(null);
   if (S.sub === "settings" && !$("sub-settings").contains(document.activeElement)) fillSettings();
 }
@@ -253,8 +274,8 @@ function renderLedger(){
   $("lgBody").innerHTML = rows.length ? rows.map(s => `<tr class="${s.void ? "void" : ""}">
     <td class="mono">${esc(ranges(s.nums))}</td>
     <td>${esc(s.buyer)}${s.anon ? ' <span class="chip">hidden</span>' : ""}</td><td>${esc(s.dept || "")}</td>
-    <td class="num">${s.nums.length}</td><td class="num" title="${esc(partsText(s.pricing))}">${esc(money(saleAmount(s)))}</td><td>${esc(s.method || "")}</td>
-    <td>${s.source === "book" ? '<span class="chip">Paper</span>' : '<span class="chip">Digital</span>'}</td>
+    <td class="num">${s.nums.length}</td><td class="num" title="${esc(partsText(s.pricing))}">${esc(money(saleAmount(s)))}</td><td>${esc(s.method || "")}${colName(s.collectorId) ? `<span style="color:var(--ink-3)"> → ${esc(colName(s.collectorId))}</span>` : ""}</td>
+    <td>${srcChip(s)}</td>
     <td>${s.void ? '<span class="chip">Void</span>' : s.paid ? '<span class="chip green">Paid</span>' : '<span class="chip gold">Unpaid</span>'}</td>
     <td style="color:var(--ink-3)" title="${esc(s.soldBy ? "by " + s.soldBy : "")}">${ago(s.at)}</td>
     <td class="acts">${s.void ? "" : `${!isFin() ? "" : s.paid ? `<button class="btn sm ghost" data-act="unpaid" data-id="${s.id}">Mark unpaid</button>` : `<button class="btn sm" data-act="paid" data-id="${s.id}">Mark paid</button>`}
@@ -311,12 +332,17 @@ function fillSettings(){
   $("cTitle").value = c.title || ""; $("cLede").value = c.lede || ""; $("cCur").value = c.currency || "";
   $("cPrefix").value = c.prefix || ""; $("cCap").value = c.cap || 0; $("cPer").value = c.perPerson || 0; $("cUrl").value = c.publicUrl || location.host;
   renderBundleRows(bundles().length ? bundles() : [{qty:1, price:0}]);
-  $("cDraw").value = c.drawAt ? new Date(new Date(c.drawAt).getTime() + 345 * 60000).toISOString().slice(0, 16) : "";
+  const npt = iso => iso ? new Date(new Date(iso).getTime() + 345 * 60000).toISOString().slice(0, 16) : "";
+  $("cDraw").value = npt(c.drawAt); $("cClose").value = npt(c.salesCloseAt);
+  const si = (S.adm?.config || c).selfIssue || {};
+  $("siOn").checked = !!si.enabled; $("siCode").value = si.code || ""; $("siHold").value = si.holdHours || 48; $("siMax").value = si.maxPer || 21;
 }
 $("sub-settings").onsubmit = e => {
   e.preventDefault(); const v = $("cDraw").value;
   act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows()} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
-    cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null}, "Settings saved");
+    cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null,
+    salesCloseAt:$("cClose").value ? $("cClose").value + ":00+05:45" : null,
+    selfIssue:{enabled:$("siOn").checked, code:$("siCode").value, holdHours:$("siHold").value, maxPer:$("siMax").value}}, "Settings saved");
 };
 
 function renderBundleRows(list){
@@ -354,7 +380,7 @@ $("sHint").onclick = e => { const b = e.target.closest("[data-to]"); if (!b) ret
 $("sellForm").onsubmit = async e => {
   e.preventDefault();
   const btn = $("sSubmit"); btn.disabled = true; btn.textContent = "Generating…";
-  const j = await act("sale", {buyer:$("sBuyer").value, dept:$("sDept").value, count:$("sCount").value, method:$("sMethod").value, paid:isFin() && $("sPaid").checked, anon:$("sAnon").checked});
+  const j = await act("sale", {buyer:$("sBuyer").value, dept:$("sDept").value, count:$("sCount").value, collectorId:$("sCollector").value, method:$("sMethod").value, paid:isFin() && $("sPaid").checked, anon:$("sAnon").checked});
   btn.disabled = false; btn.textContent = "Generate tickets";
   if (!j) return;
   S.lastIssued = j.sale; renderTicket(j.sale);
@@ -448,7 +474,7 @@ function updatePaperTotal(){
 $("pNums").oninput = updatePaperTotal;
 $("paperForm").onsubmit = async e => {
   e.preventDefault();
-  const j = await act("bookSale", {nums:$("pNums").value, buyer:$("pBuyer").value, dept:$("pDept").value, method:$("pMethod").value, paid:isFin() && $("pPaid").checked, anon:$("pAnon").checked});
+  const j = await act("bookSale", {nums:$("pNums").value, buyer:$("pBuyer").value, dept:$("pDept").value, collectorId:$("pCollector").value, method:$("pMethod").value, paid:isFin() && $("pPaid").checked, anon:$("pAnon").checked});
   if (!j) return;
   toast(`Recorded ${ranges(j.sale.nums)} for ${j.sale.buyer}`);
   ["pNums","pBuyer","pDept"].forEach(id => $(id).value = ""); $("pAnon").checked = false; updatePaperTotal(); $("pNums").focus();
@@ -673,9 +699,183 @@ function nextPop(){
 function hidePop(){ $("pop").classList.remove("show"); clearTimeout(popTimer); setTimeout(nextPop, 500); }
 $("popX").onclick = hidePop;
 
+/* ---------------- collectors (shared) ---------------- */
+const METHODS = ["Cash","eSewa","Khalti","Bank transfer","Salary deduction","Other"];
+const collectors = () => cfg().collectors || [];
+const colName = id => (S.adm?.config.collectors || collectors()).find(c => c.id === id)?.name || "";
+const srcChip = s => s.source === "book" ? '<span class="chip">Paper</span>' : s.source === "self" ? '<span class="chip gold">Self-service</span>' : '<span class="chip">Digital</span>';
+function fillCollectorSelect(colId, methId){
+  const cs = collectors(), cSel = $(colId), mSel = $(methId), prevC = cSel.value, prevM = mSel.value;
+  const cHtml = cs.map(c => `<option value="${esc(c.id)}">${esc(c.name)}${c.kind === "finance" ? " (Finance)" : ""}</option>`).join("");
+  if (cSel.dataset.h !== cHtml){ cSel.innerHTML = cHtml; cSel.dataset.h = cHtml; if (cs.some(c => c.id === prevC)) cSel.value = prevC; }
+  const c = cs.find(x => x.id === cSel.value), ms = c ? c.methods : [];
+  const mHtml = ms.map(m => `<option>${esc(m)}</option>`).join("");
+  if (mSel.dataset.h !== mHtml){ mSel.innerHTML = mHtml; mSel.dataset.h = mHtml; if (ms.includes(prevM)) mSel.value = prevM; }
+}
+$("sCollector").onchange = () => fillCollectorSelect("sCollector", "sMethod");
+$("pCollector").onchange = () => fillCollectorSelect("pCollector", "pMethod");
+
+/* ---------------- self-service ---------------- */
+S.receiptToken = new URLSearchParams(location.search).get("r"); S.receipt = null;
+try { $("bCode").value = localStorage.getItem("raffle.code") || ""; } catch {}
+let buyCollector = null;
+function renderBuy(){
+  const open = salesOpen(), on = selfOn(), closed = $("buyClosed");
+  if (S.receiptToken){ $("buyForm").hidden = true; closed.hidden = true; renderReceipt(); return; }
+  $("receipt").hidden = true;
+  if (!on || !open){ $("buyForm").hidden = true; closed.hidden = false;
+    closed.innerHTML = `<h2>${open ? "Self-service isn't open" : "Ticket sales have closed"}</h2><p class="hint">${open ? "Buy your tickets from an organiser or the finance team." : "Thanks to everyone who took part. Watch the live draw on the Draw stage."}</p>`; return; }
+  closed.hidden = true; $("buyForm").hidden = false;
+  const bs = bundles(), max = cfg().selfIssue?.maxPer || 21;
+  $("bCount").max = max;
+  const tHtml = bs.map(b => `<button type="button" data-q="${b.qty}" aria-pressed="false"><b>${b.qty} ticket${b.qty > 1 ? "s" : ""}</b><span>${esc(money(b.price))}${b.qty > 1 ? " · " + esc(money(Math.round(b.price / b.qty))) + " each" : ""}</span></button>`).join("");
+  if ($("buyTiers").dataset.h !== tHtml){ $("buyTiers").innerHTML = tHtml; $("buyTiers").dataset.h = tHtml; }
+  const cs = collectors(); if (!cs.some(c => c.id === buyCollector)) buyCollector = cs[0]?.id || null;
+  const cHtml = cs.map(c => `<label><input type="radio" name="bCol" value="${esc(c.id)}" ${c.id === buyCollector ? "checked" : ""}><span><span class="cn">${esc(c.name)}</span><br><span class="cm">${c.kind === "finance" ? "Finance · " : ""}${esc(c.methods.join(", "))}</span></span></label>`).join("");
+  if ($("buyCollectors").dataset.h !== cHtml + buyCollector){ $("buyCollectors").innerHTML = cHtml; $("buyCollectors").dataset.h = cHtml + buyCollector; }
+  const c = cs.find(x => x.id === buyCollector), mSel = $("bMethod"), prev = mSel.value;
+  const mHtml = (c?.methods || []).map(m => `<option>${esc(m)}</option>`).join("");
+  if (mSel.dataset.h !== mHtml){ mSel.innerHTML = mHtml; mSel.dataset.h = mHtml; if (c?.methods.includes(prev)) mSel.value = prev; }
+  updateBuyTotal();
+}
+function updateBuyTotal(){
+  const max = cfg().selfIssue?.maxPer || 21, i = $("bCount"); let n = parseInt(i.value, 10) || 1; n = Math.max(1, Math.min(max, n));
+  const p = priceFor(n), up = n < max ? upsell(n, true) : null;
+  $("bTotal").textContent = p ? money(p.amount) : "—";
+  $("bBreak").textContent = p && n > 1 ? partsText(p.parts) : "";
+  document.querySelectorAll("#buyTiers button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.q === n));
+  const h = $("bHint"); h.hidden = !up || up.m > max;
+  if (up && up.m <= max) h.innerHTML = `<span>${up.text}</span><button type="button" class="btn sm" data-to="${up.m}">Make it ${up.m}</button>`;
+}
+$("buyTiers").onclick = e => { const b = e.target.closest("[data-q]"); if (b){ $("bCount").value = b.dataset.q; updateBuyTotal(); } };
+$("bHint").onclick = e => { const b = e.target.closest("[data-to]"); if (b){ $("bCount").value = b.dataset.to; updateBuyTotal(); } };
+$("bMinus").onclick = () => { $("bCount").value = Math.max(1, (+$("bCount").value || 1) - 1); updateBuyTotal(); };
+$("bPlus").onclick = () => { $("bCount").value = Math.min(cfg().selfIssue?.maxPer || 21, (+$("bCount").value || 1) + 1); updateBuyTotal(); };
+$("bCount").oninput = updateBuyTotal;
+$("buyCollectors").onchange = e => { if (e.target.name === "bCol"){ buyCollector = e.target.value; renderBuy(); } };
+$("buyForm").onsubmit = async e => {
+  e.preventDefault(); $("bErr").textContent = "";
+  const btn = $("bSubmit"); btn.disabled = true; btn.textContent = "Reserving…";
+  try {
+    const j = await api("/api/self/issue", {code:$("bCode").value, buyer:$("bName").value, dept:$("bDept").value, phone:$("bPhone").value, count:$("bCount").value,
+      collectorId:buyCollector, method:$("bMethod").value, anon:$("bAnon").checked});
+    try { localStorage.setItem("raffle.code", $("bCode").value.trim()); } catch {}
+    S.receipt = j.receipt; S.receiptToken = j.receipt.token;
+    try { history.replaceState(null, "", "?r=" + encodeURIComponent(S.receiptToken) + "#buy"); } catch {}
+    renderBuy(); burst(innerWidth / 2, 200, 80); scrollTo({top:0, behavior:reduced ? "auto" : "smooth"});
+  } catch (err){ $("bErr").textContent = err.message; }
+  finally { btn.disabled = false; btn.textContent = "Reserve my tickets"; }
+};
+async function fetchReceipt(){
+  if (!S.receiptToken) return;
+  try { const r = await fetch("/api/receipt?t=" + encodeURIComponent(S.receiptToken), {cache:"no-store"}); S.receiptLoaded = true; if (r.ok){ S.receipt = (await r.json()).receipt; if (S.tab === "buy") renderReceipt(); } else if (r.status === 404){ S.receipt = null; renderReceipt(); } } catch {}
+}
+function renderReceipt(){
+  const el = $("receipt"); el.hidden = false; const r = S.receipt;
+  if (!r && !S.receiptLoaded){ el.innerHTML = `<p class="hint">Loading your receipt…</p>`; return; }
+  if (!r){ el.innerHTML = `<h2>Receipt not found</h2><p class="hint">Check the link, or reserve new tickets.</p><div><button type="button" class="btn" data-new>Reserve tickets</button></div>`; return; }
+  const c = r.collector, ref = tno(r.nums[0]);
+  const status = r.paid ? `<span class="chip green">Paid · you're in the draw</span>` : r.expired ? `<span class="chip">Expired</span>` : r.void ? `<span class="chip">Cancelled</span>` : r.claimedAt ? `<span class="chip gold">Waiting for finance to confirm</span>` : `<span class="chip red">Payment needed</span>`;
+  const pending = !r.paid && !r.void;
+  el.innerHTML = `
+    <div class="status"><h2 style="margin-right:auto">${r.paid ? "You're in!" : pending ? "Tickets reserved" : "Reservation closed"}</h2>${status}</div>
+    <div class="ticket"><div class="t-main">
+      <div class="ev">${esc(cfg().title || "Dashain Raffle")} · ${r.nums.length} ticket${r.nums.length > 1 ? "s" : ""}</div>
+      <div class="ttl">शुभ दशैं</div>
+      <div class="tno">${esc(ref)}${r.nums.length > 1 ? `<span style="font-size:.55em;opacity:.7"> +${r.nums.length - 1} more</span>` : ""}</div>
+      <div class="holder">${esc(r.buyer)}${r.dept ? ` <span style="font-weight:500;color:#6B5433">· ${esc(r.dept)}</span>` : ""}</div>
+      <div class="fine2">${r.paid ? "Paid" : "Payment pending"} · ${esc(money(r.amount))}</div>
+      ${r.nums.length > 1 ? `<div class="tlist">${r.nums.map(n => `<span>${esc(tno(n))}</span>`).join("")}</div>` : ""}
+    </div><div class="t-stub">${kiteSVG("#FFB930","#FFF3E0",30)}<div class="v">${esc(ref)}</div><div class="sh">जय<br>दशैं</div></div></div>
+    ${pending ? `<div class="pay-box">
+      ${c?.qr && r.method !== "Cash" ? `<img src="${esc(c.qr)}" alt="Payment QR for ${esc(c.name)}">` : ""}
+      <div>
+        <div class="eyebrow">Pay ${c ? esc(c.name) : "the raffle team"}${r.method ? " · " + esc(r.method) : ""}</div>
+        <div class="amt">${esc(money(r.amount))}</div>
+        ${r.method !== "Cash" ? `<div class="hint" style="margin-top:4px">Put <span class="ref">${esc(ref)}</span> in the payment remarks so we can match it.</div>` : ""}
+        ${c?.note ? `<p class="hint" style="margin-top:6px">${esc(c.note)}</p>` : ""}
+        ${r.method === "Cash" ? `<p class="hint" style="margin-top:6px">Hand the cash to ${c ? esc(c.name) : "the collector"} and mention ${esc(ref)}.</p>` : ""}
+        ${!r.claimedAt && r.expiresAt ? `<p class="hint" style="margin-top:6px">Held for you until <b>${esc(fmtDate(r.expiresAt))}</b>. Unpaid reservations are released after that.</p>` : ""}
+      </div></div>
+      ${r.claimedAt ? `<p class="hint">Thanks! You told us you paid${r.txn ? ` (reference ${esc(r.txn)})` : ""}. Finance will confirm shortly and this page updates by itself.</p>`
+        : `<form class="claim" id="claimForm"><input type="text" id="claimTxn" maxlength="60" placeholder="${r.method === "Cash" ? "Who did you hand it to? (optional)" : "Transaction ID from " + esc(r.method || "your payment app")}"><button class="btn dark" type="submit">I've paid</button></form>`}` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn" data-copy>Copy my receipt link</button>
+      <button type="button" class="btn ghost" data-new>Reserve more tickets</button>
+    </div>
+    <p class="hint">Bookmark this page. It's your receipt, and it updates live when your payment is confirmed.</p>`;
+}
+$("receipt").onclick = e => {
+  if (e.target.closest("[data-copy]")) navigator.clipboard.writeText(location.origin + "/?r=" + encodeURIComponent(S.receiptToken) + "#buy").then(() => toast("Receipt link copied"), () => toast("Copy isn't available. Bookmark this page instead."));
+  if (e.target.closest("[data-new]")){ S.receiptToken = null; S.receipt = null; try { history.replaceState(null, "", "/#buy"); } catch {} renderBuy(); }
+};
+$("receipt").onsubmit = async e => {
+  if (e.target.id !== "claimForm") return; e.preventDefault();
+  try { const j = await api("/api/self/claim", {token:S.receiptToken, txn:$("claimTxn").value}); S.receipt = j.receipt; renderReceipt(); toast("Thanks! Finance will confirm your payment."); }
+  catch (err){ toast(err.message); }
+};
+
+/* ---------------- payments queue (finance) ---------------- */
+function renderPayments(){
+  if (!S.adm || !isFin()) return;
+  const pend = S.adm.sales.filter(s => !s.void && !s.paid), claimed = pend.filter(s => s.claimedAt).length;
+  $("payCount").hidden = !pend.length; $("payCount").textContent = pend.length;
+  const fSel = $("payF"), prev = fSel.value || "all";
+  const fHtml = `<option value="all">All collectors</option>` + S.adm.config.collectors.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  if (fSel.dataset.h !== fHtml){ fSel.innerHTML = fHtml; fSel.dataset.h = fHtml; fSel.value = [...fSel.options].some(o => o.value === prev) ? prev : "all"; }
+  if (S.sub !== "payments") return;
+  const rows = pend.filter(s => (fSel.value === "all" || s.collectorId === fSel.value) && (!$("payClaimed").checked || s.claimedAt))
+    .sort((a, b) => (!!b.claimedAt - !!a.claimedAt) || (a.at || "").localeCompare(b.at || ""));
+  $("payBody").innerHTML = rows.length ? rows.map(s => `<tr>
+    <td class="mono">${esc(ranges(s.nums))}</td>
+    <td>${esc(s.buyer)}${s.dept ? `<span style="color:var(--ink-3)"> · ${esc(s.dept)}</span>` : ""}${s.phone ? `<br><span class="mono" style="font-size:.8rem;color:var(--ink-3)">${esc(s.phone)}</span>` : ""}</td>
+    <td class="num">${esc(money(saleAmount(s)))}</td>
+    <td>${esc(colName(s.collectorId) || "—")}<br><span style="color:var(--ink-3);font-size:.82rem">${esc(s.method || "")}</span></td>
+    <td>${s.claimedAt ? `<span class="chip gold">Says paid</span> <span class="mono">${esc(s.txn || "")}</span>` : '<span style="color:var(--ink-3)">—</span>'}</td>
+    <td>${srcChip(s)}</td>
+    <td style="color:var(--ink-3)">${ago(s.at)}${s.expiresAt && !s.claimedAt ? `<br><span style="font-size:.8rem">lapses ${esc(fmtDate(s.expiresAt))}</span>` : ""}</td>
+    <td class="acts"><button class="btn sm primary" data-pay="${s.id}">Confirm paid</button><button class="btn sm ghost danger" data-rej="${s.id}">Reject</button></td></tr>`).join("")
+    : `<tr><td colspan="8" class="empty" style="text-align:center">${pend.length ? "Nothing matches this filter." : "All caught up. No payments waiting."}</td></tr>`;
+}
+$("payF").onchange = renderPayments; $("payClaimed").onchange = renderPayments;
+$("payBody").onclick = e => {
+  const p = e.target.closest("[data-pay]"), r = e.target.closest("[data-rej]");
+  if (p){ const s = S.adm.sales.find(x => x.id === p.dataset.pay); p.disabled = true; act("saleUpdate", {id:p.dataset.pay, paid:true}, `Confirmed ${s ? ranges(s.nums) : ""}`); }
+  if (r) armed(r, () => act("saleUpdate", {id:r.dataset.rej, void:true}, "Reservation rejected and released"));
+};
+
+/* ---------------- collectors editor (finance) ---------------- */
+let colDirty = false;
+function renderCollectors(force){
+  if (!S.adm || !isFin()) return;
+  const host = $("colRows"); if (!force && (colDirty || host.contains(document.activeElement))) return;
+  host.innerHTML = S.adm.config.collectors.map(colRow).join("");
+}
+const colRow = c => `<div class="col-row" data-id="${esc(c.id || "")}">
+  <label class="f">Name<input type="text" data-k="name" id="cn-${esc(c.id || Math.random().toString(36).slice(2))}" value="${esc(c.name || "")}" maxlength="50" placeholder="e.g. Sunita, HR desk"></label>
+  <label class="f">Type<select data-k="kind"><option value="finance" ${c.kind === "finance" ? "selected" : ""}>Finance</option><option value="designated" ${c.kind !== "finance" ? "selected" : ""}>Designated person</option></select></label>
+  <div class="meth">${METHODS.map(m => `<label class="check"><input type="checkbox" data-m="${esc(m)}" ${(c.methods || []).includes(m) ? "checked" : ""}> ${esc(m)}</label>`).join("")}</div>
+  <label class="f" style="grid-column:1/-1">Note for buyers (optional)<input type="text" data-k="note" value="${esc(c.note || "")}" maxlength="160" placeholder="e.g. Desk 4, 2nd floor. Scan the QR in eSewa."></label>
+  <div class="qr">${c.qrUrl ? `<img src="${esc(c.qrUrl)}" alt="QR for ${esc(c.name)}">` : `<span class="none">No QR yet</span>`}
+    ${c.id ? `<label class="btn sm">Upload QR<input type="file" accept="image/png,image/jpeg,image/webp" data-qr="${esc(c.id)}" hidden></label>${c.qrUrl ? `<button type="button" class="btn sm ghost" data-qrrm="${esc(c.id)}">Remove QR</button>` : ""}` : `<span class="hint">Save collectors first, then upload the QR.</span>`}
+    <button type="button" class="btn sm ghost danger" data-colrm style="margin-left:auto">Remove collector</button></div>
+</div>`;
+const readCollectors = () => [...$("colRows").querySelectorAll(".col-row")].map(r => ({id:r.dataset.id || undefined, name:r.querySelector('[data-k=name]').value,
+  kind:r.querySelector('[data-k=kind]').value, note:r.querySelector('[data-k=note]').value, methods:[...r.querySelectorAll("[data-m]:checked")].map(i => i.dataset.m)}));
+$("colRows").oninput = () => { colDirty = true; };
+$("colRows").onclick = e => { const rm = e.target.closest("[data-colrm]"); if (rm){ rm.closest(".col-row").remove(); colDirty = true; }
+  const q = e.target.closest("[data-qrrm]"); if (q) act("collectorQr", {id:q.dataset.qrrm, remove:true}, "QR removed").then(() => renderCollectors(true)); };
+$("colRows").onchange = e => {
+  const f = e.target.closest("[data-qr]"); if (!f || !f.files[0]) return;
+  const file = f.files[0]; if (file.size > 2 * 1024 * 1024) return toast("That image is over 2 MB. Use a smaller screenshot.");
+  const rd = new FileReader(); rd.onload = () => act("collectorQr", {id:f.dataset.qr, dataUrl:rd.result}, "QR uploaded").then(() => renderCollectors(true)); rd.readAsDataURL(file);
+};
+$("addCol").onclick = () => { $("colRows").insertAdjacentHTML("beforeend", colRow({kind:"designated", methods:["Cash"]})); colDirty = true; };
+$("saveCols").onclick = async () => { const j = await act("collectors", {collectors:readCollectors()}, "Collectors saved"); if (j){ colDirty = false; renderCollectors(true); } };
+
 /* ---------------- data ---------------- */
 function setLive(ok, txt){ $("liveDot").classList.toggle("off", !ok); $("liveTxt").textContent = txt; }
-function renderAll(){ renderBoard(); renderTicker(); renderStageCtl(); renderStage(); renderPrizeBoard(); renderManage(); tick(); }
+function renderAll(){ renderWindow(); if (S.tab === "buy") renderBuy(); renderBoard(); renderTicker(); renderStageCtl(); renderStage(); renderPrizeBoard(); renderManage(); tick(); }
 let loading = null, again = false;
 async function load(){
   if (loading){ again = true; return loading; }
@@ -687,7 +887,7 @@ async function load(){
       if (S.admin){ try { S.adm = (await api("/api/admin/state")); } catch {} }
       setLive(true, "Live");
       const fresh = had ? S.pub.sales.filter(s => !prevIds.has(s.id)) : [];
-      renderAll();
+      renderAll(); fetchReceipt();
       if (fresh.length && S.tab !== "manage"){ queuePops(fresh); if (S.tab === "board") burst(innerWidth / 2, 160, 36); }
     } catch { setLive(false, "Reconnecting…"); }
   })();
@@ -701,7 +901,8 @@ function connect(){
   es.onopen = () => setLive(true, "Live");
 }
 async function boot(){
-  const h = (location.hash || "").replace("#", ""); if (["draw","manage"].includes(h)) setTab(h);
+  const h = (location.hash || "").replace("#", "");
+  if (S.receiptToken) setTab("buy"); else if (["buy","draw","manage"].includes(h)) setTab(h);
   try { const me = await (await fetch("/api/me", {cache:"no-store"})).json(); S.admin = !!me.admin; S.me = me.name; S.role = me.role; } catch {}
   renderAuth(); await load(); connect();
   setInterval(() => { if (S.tab === "board") renderBoard(); refreshTickerTimes(); }, 30000);

@@ -23,7 +23,9 @@ if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12 || !FINANCE_PASSWORD || FINANC
 /* ---------------- store ---------------- */
 const DB_FILE = path.join(DATA_DIR, "raffle.json");
 const SNAP_DIR = path.join(DATA_DIR, "snapshots");
-fs.mkdirSync(SNAP_DIR, { recursive: true });
+const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+fs.mkdirSync(SNAP_DIR, { recursive: true }); fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const METHODS = ["Cash", "eSewa", "Khalti", "Bank transfer", "Salary deduction", "Other"];
 
 const DEFAULT = () => ({
   version: 0,
@@ -36,6 +38,10 @@ let db;
 try { db = { ...DEFAULT(), ...JSON.parse(fs.readFileSync(DB_FILE, "utf8")) }; }
 catch (e) { if (e.code !== "ENOENT") { console.error("cannot read", DB_FILE, e.message); process.exit(1); } db = DEFAULT(); }
 
+// sales window, self-issue and payment collectors (added after launch; fill in on older data files)
+db.config.salesCloseAt ??= null;
+db.config.selfIssue = { enabled: false, code: "", holdHours: 48, maxPer: 21, ...(db.config.selfIssue || {}) };
+db.config.collectors ??= [{ id: "c-finance", name: "Finance team", kind: "finance", methods: ["Cash", "eSewa", "Khalti", "Bank transfer"], note: "", qr: null }];
 // pricing: bundles[] is the price list; `price` mirrors the 1-ticket tier. Older sales keep what they were charged.
 if (!Array.isArray(db.config.bundles) || !db.config.bundles.length) db.config.bundles = [{ qty: 1, price: +db.config.price || 0 }];
 for (const s of db.sales) if (s.amount == null) s.amount = s.nums.length * (s.price ?? db.config.price ?? 0);
@@ -95,6 +101,15 @@ function priceFor(n, bundles = db.config.bundles) {
   return { amount: best[n].amount, parts: [...counts].sort((x, y) => y[0].qty - x[0].qty).map(([b, times]) => ({ qty: b.qty, price: b.price, times })) };
 }
 function charge(n) { const p = priceFor(n); if (!p) throw bad("That number of tickets can't be made from the bundles on sale"); return p; }
+const salesOpen = () => !db.config.salesCloseAt || Date.now() < Date.parse(db.config.salesCloseAt);
+function assertOpen() { if (!salesOpen()) throw bad("Ticket sales have closed"); }
+function pickCollector(b) {
+  const cs = db.config.collectors || []; if (!b.collectorId && !cs.length) return {};
+  const c = cs.find(x => x.id === b.collectorId); if (!c) throw bad("Choose who the payment goes to");
+  const method = str(b.method, 30); if (!c.methods.includes(method)) throw bad(`${c.name} doesn't take ${method || "that payment method"}`);
+  return { collectorId: c.id, method };
+}
+const collectorPublic = c => ({ id: c.id, name: c.name, kind: c.kind, methods: c.methods, note: c.note, qr: c.qr ? "/uploads/" + c.qr : null });
 function allocate(count) { const from = db.counter; db.counter += count; return Array.from({ length: count }, (_, i) => from + i); }
 function parseNums(spec) {
   const out = new Set();
@@ -119,7 +134,8 @@ function checkLimits(buyer, count) {
 
 function publicState() {
   return {
-    version: db.version, config: db.config, prizes: db.prizes,
+    version: db.version, prizes: db.prizes, salesOpen: salesOpen(),
+    config: { ...db.config, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) },
     sales: liveSales().map(s => ({ id: s.id, name: publicName(s), dept: s.anon ? "" : s.dept, nums: s.nums, paid: s.paid, at: s.at })),
     draws: db.draws.map(d => { const s = saleFor(d.ticket); return { id: d.id, prizeId: d.prizeId, prizeName: d.prizeName, ticket: d.ticket, name: s ? publicName(s) : "—", dept: s && !s.anon ? s.dept : "", at: d.at }; }),
     stage: stagePublic(), inDraw: eligible().length,
@@ -129,7 +145,7 @@ function stagePublic() {
   const st = db.stage; if (st.state !== "revealed") return st;
   const s = saleFor(st.ticket); return { ...st, name: s ? publicName(s) : "", dept: s && !s.anon ? s.dept : "" };
 }
-function adminState() { return { ...db, stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
+function adminState() { return { ...db, config: { ...db.config, collectors: db.config.collectors.map(c => ({ ...c, qrUrl: c.qr ? "/uploads/" + c.qr : null })) }, salesOpen: salesOpen(), stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
 
 /* ---------------- sessions ---------------- */
 const sign = v => crypto.createHmac("sha256", SESSION_SECRET).update(v).digest("base64url");
@@ -164,10 +180,10 @@ function send(res, status, obj, headers = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(obj));
 }
-function body(req) {
+function body(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let n = 0; const chunks = [];
-    req.on("data", c => { n += c.length; if (n > 64 * 1024) { reject(bad("Request too large", 413)); req.destroy(); } else chunks.push(c); });
+    req.on("data", c => { n += c.length; if (n > limit) { reject(bad("Request too large", 413)); req.destroy(); } else chunks.push(c); });
     req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}); } catch { reject(bad("Invalid JSON")); } });
     req.on("error", reject);
   });
@@ -198,9 +214,10 @@ function serveStatic(req, res) {
 const actions = {
   sale(b, who) {
     const buyer = str(b.buyer, 80); if (!buyer) throw bad("Enter the buyer's name");
-    const count = int(b.count, 1, 100); checkLimits(buyer, count); const pr = charge(count);
+    assertOpen();
+    const count = int(b.count, 1, 100); checkLimits(buyer, count); const pr = charge(count), pay = pickCollector(b);
     if (!who.finance) b.paid = false; // organisers record sales; finance confirms the money
-    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums: allocate(count), amount: pr.amount, pricing: pr.parts, method: str(b.method, 30),
+    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums: allocate(count), amount: pr.amount, pricing: pr.parts, method: str(b.method, 30), ...pay,
       paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who.name, source: "digital" };
     db.sales.push(sale); audit(who.name, `sold ${count} to ${buyer}`); return { sale };
   },
@@ -211,9 +228,10 @@ const actions = {
       if (!batchFor(n)) throw bad(`Ticket ${n} isn't in any printed ticket book`);
       if (taken.has(n)) throw bad(`Ticket ${n} has already been sold`);
     }
-    checkLimits(buyer, nums.length); const pr = charge(nums.length);
+    assertOpen();
+    checkLimits(buyer, nums.length); const pr = charge(nums.length), pay = pickCollector(b);
     if (!who.finance) b.paid = false;
-    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums, amount: pr.amount, pricing: pr.parts, method: str(b.method, 30),
+    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums, amount: pr.amount, pricing: pr.parts, method: str(b.method, 30), ...pay,
       paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who.name, source: "book", batchId: batchFor(nums[0]).id };
     db.sales.push(sale); audit(who.name, `recorded paper tickets ${nums.join(",")} for ${buyer}`); return { sale };
   },
@@ -221,7 +239,7 @@ const actions = {
     const s = db.sales.find(x => x.id === b.id); if (!s) throw bad("Sale not found", 404);
     if ("paid" in b) financeOnly(who, "change payment status");
     if (b.void && s.paid) financeOnly(who, "void a paid sale");
-    if ("paid" in b) { s.paid = !!b.paid; s.paidAt = s.paid ? new Date().toISOString() : null; audit(who.name, `${s.paid ? "paid" : "unpaid"} ${s.id}`); }
+    if ("paid" in b) { s.paid = !!b.paid; s.paidAt = s.paid ? new Date().toISOString() : null; s.confirmedBy = s.paid ? who.name : null; audit(who.name, `${s.paid ? "paid" : "unpaid"} ${s.id}`); }
     if (b.void) {
       if (db.draws.some(d => s.nums.includes(d.ticket))) throw bad("One of these tickets has already won. Remove that result first.");
       s.void = true; s.voidAt = new Date().toISOString(); audit(who.name, `voided ${s.id}`);
@@ -263,8 +281,41 @@ const actions = {
       title: str(b.title, 60) || "Dashain Raffle", lede: str(b.lede, 160), bundles, price: bundles[0].price, currency: str(b.currency, 6),
       prefix: (str(b.prefix, 5).toUpperCase().replace(/[^A-Z0-9]/g, "") || "T"), cap: int(b.cap, 0, 100000), perPerson: int(b.perPerson, 0, 10000),
       drawAt: b.drawAt && !isNaN(Date.parse(b.drawAt)) ? new Date(b.drawAt).toISOString() : null, publicUrl: str(b.publicUrl, 80) || c.publicUrl,
+      salesCloseAt: b.salesCloseAt && !isNaN(Date.parse(b.salesCloseAt)) ? new Date(b.salesCloseAt).toISOString() : null,
     });
+    if (b.selfIssue) {
+      const si = b.selfIssue, code = str(si.code, 40);
+      if (si.enabled && code.length < 4) throw bad("Set an access code of at least 4 characters before opening self-service");
+      c.selfIssue = { enabled: !!si.enabled, code, holdHours: int(si.holdHours, 1, 336), maxPer: int(si.maxPer, 1, 100) };
+    }
     audit(who.name, "updated settings"); return { config: c };
+  },
+  collectors(b, who) {
+    financeOnly(who, "manage payment collectors");
+    const old = new Map((db.config.collectors || []).map(c => [c.id, c]));
+    const list = (Array.isArray(b.collectors) ? b.collectors : []).slice(0, 12).map(x => {
+      const id = /^c-[a-z0-9]{4,20}$/.test(x.id || "") ? x.id : uid("c");
+      const methods = (Array.isArray(x.methods) ? x.methods : []).filter(m => METHODS.includes(m));
+      const name = str(x.name, 50); if (!name) throw bad("Every collector needs a name");
+      if (!methods.length) throw bad(`Pick at least one payment method for ${name}`);
+      return { id, name, kind: x.kind === "finance" ? "finance" : "designated", methods, note: str(x.note, 160), qr: old.get(id)?.qr || null };
+    });
+    if (!list.length) throw bad("Keep at least one collector so buyers know who to pay");
+    for (const [id, c] of old) if (!list.some(x => x.id === id) && c.qr) fs.rm(path.join(UPLOAD_DIR, c.qr), () => {});
+    db.config.collectors = list; audit(who.name, `saved ${list.length} payment collectors`); return { collectors: list };
+  },
+  collectorQr(b, who) {
+    financeOnly(who, "upload payment QR codes");
+    const c = (db.config.collectors || []).find(x => x.id === b.id); if (!c) throw bad("Save the collector first, then upload the QR");
+    if (b.remove) { if (c.qr) fs.rm(path.join(UPLOAD_DIR, c.qr), () => {}); c.qr = null; audit(who.name, `removed QR for ${c.name}`); return {}; }
+    const m = String(b.dataUrl || "").match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/); if (!m) throw bad("Upload a PNG, JPG or WebP image");
+    const buf = Buffer.from(m[2], "base64"); if (buf.length > 2 * 1024 * 1024) throw bad("That image is over 2 MB. Use a smaller screenshot.");
+    const sig = { png: [0x89, 0x50, 0x4e, 0x47], jpeg: [0xff, 0xd8, 0xff], webp: [0x52, 0x49, 0x46, 0x46] }[m[1]];
+    if (!sig.every((v, i) => buf[i] === v)) throw bad("That file isn't a valid image");
+    const file = `qr-${c.id}-${crypto.randomBytes(4).toString("hex")}.${m[1] === "jpeg" ? "jpg" : m[1]}`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, file), buf);
+    if (c.qr) fs.rm(path.join(UPLOAD_DIR, c.qr), () => {});
+    c.qr = file; audit(who.name, `uploaded QR for ${c.name}`); return { qr: "/uploads/" + file };
   },
   draw(b, who) {
     if (db.stage.state === "rolling") throw bad("A draw is already in progress", 409);
@@ -291,15 +342,75 @@ const actions = {
   stageReset(b, who) { if (db.stage.state === "rolling") throw bad("Wait for the current draw to finish", 409); db.stage = { state: "idle", at: new Date().toISOString() }; return {}; },
 };
 
+/* ---------------- self-service (public, access-code gated) ---------------- */
+const selfHits = new Map();
+function selfRate(req, max) {
+  const ip = clientIp(req), now = Date.now(), a = selfHits.get(ip) || { n: 0, reset: now + 3600e3 };
+  if (now > a.reset) { a.n = 0; a.reset = now + 3600e3; }
+  if (a.n >= max) throw bad("Too many requests from this device. Try again in an hour or ask an organiser.", 429);
+  a.n++; selfHits.set(ip, a);
+}
+const receiptOf = s => {
+  const c = (db.config.collectors || []).find(x => x.id === s.collectorId);
+  return { token: s.token, buyer: s.buyer, dept: s.dept, nums: s.nums, amount: s.amount, pricing: s.pricing, method: s.method, paid: s.paid, void: s.void,
+    expired: !!s.expired, expiresAt: s.expiresAt, claimedAt: s.claimedAt || null, txn: s.txn || "", at: s.at, collector: c ? collectorPublic(c) : null };
+};
+const selfService = {
+  issue(b, req) {
+    const si = db.config.selfIssue;
+    if (!si.enabled) throw bad("Self-service tickets are switched off. Ask an organiser.", 403);
+    assertOpen();
+    const code = String(b.code || "").trim().toLowerCase();
+    if (!code || !crypto.timingSafeEqual(crypto.createHash("sha256").update(code).digest(), crypto.createHash("sha256").update(si.code.trim().toLowerCase()).digest())) {
+      selfRate(req, 20); throw bad("That access code isn't right. It's shared on the company channel.", 403);
+    }
+    selfRate(req, 8);
+    const buyer = str(b.buyer, 80); if (buyer.length < 2) throw bad("Enter your full name");
+    const count = int(b.count, 1, si.maxPer); checkLimits(buyer, count);
+    const pr = charge(count), pay = pickCollector(b);
+    const now = Date.now();
+    const sale = { id: uid("s"), token: crypto.randomBytes(12).toString("base64url"), buyer, dept: str(b.dept, 40), phone: str(b.phone, 20), nums: allocate(count),
+      amount: pr.amount, pricing: pr.parts, ...pay, paid: false, anon: !!b.anon, void: false, at: new Date(now).toISOString(),
+      expiresAt: new Date(now + si.holdHours * 3600e3).toISOString(), soldBy: "Self-service", source: "self" };
+    db.sales.push(sale); audit("Self-service", `${buyer} reserved ${count}`); save();
+    return { receipt: receiptOf(sale) };
+  },
+  claim(b, req) {
+    selfRate(req, 30);
+    const s = db.sales.find(x => x.token && x.token === String(b.token || "")); if (!s) throw bad("Receipt not found", 404);
+    if (s.void) throw bad(s.expired ? "This reservation expired. Reserve new tickets." : "This reservation was cancelled.");
+    s.txn = str(b.txn, 60); s.claimedAt = new Date().toISOString(); audit("Self-service", `${s.buyer} says paid (${s.txn || "no reference"})`); save();
+    return { receipt: receiptOf(s) };
+  },
+};
+// unpaid self-service reservations lapse after the hold window so they never clutter the books
+setInterval(() => {
+  const now = Date.now(); let n = 0;
+  for (const s of db.sales) if (s.source === "self" && !s.paid && !s.void && s.expiresAt && Date.parse(s.expiresAt) < now && !s.claimedAt) { s.void = true; s.expired = true; s.voidAt = new Date(now).toISOString(); n++; }
+  if (n) { audit("System", `expired ${n} unpaid self-service reservation${n > 1 ? "s" : ""}`); save(); }
+}, 60e3);
+
 /* ---------------- router ---------------- */
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   try {
     if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: db.version });
+    if (url.pathname.startsWith("/uploads/")) {
+      const f = url.pathname.slice(9); if (!/^qr-c-[a-z0-9-]+\.(png|jpg|webp)$/.test(f)) return send(res, 404, { error: "Not found" });
+      return fs.readFile(path.join(UPLOAD_DIR, f), (err, buf) => {
+        if (err) return send(res, 404, { error: "Not found" });
+        res.writeHead(200, { "content-type": { png: "image/png", jpg: "image/jpeg", webp: "image/webp" }[f.split(".").pop()], "cache-control": "public, max-age=86400, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" });
+        res.end(buf);
+      });
+    }
     if (!url.pathname.startsWith("/api/")) return serveStatic(req, res);
 
     const session = readSession(req);
     if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, publicState());
+    if (req.method === "GET" && url.pathname === "/api/receipt") {
+      const s = db.sales.find(x => x.token && x.token === url.searchParams.get("t"));
+      return s ? send(res, 200, { receipt: receiptOf(s) }) : send(res, 404, { error: "Receipt not found" });
+    }
     if (req.method === "GET" && url.pathname === "/api/me") return send(res, 200, { admin: !!session, name: session?.name || null, role: session?.role || null });
     if (req.method === "GET" && url.pathname === "/api/events") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
@@ -323,6 +434,8 @@ const server = http.createServer(async (req, res) => {
       audit(name, `signed in (${role})`); save();
       return send(res, 200, { admin: true, name, role }, { "set-cookie": `rs=${makeSession(name, role)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}` });
     }
+    if (url.pathname === "/api/self/issue") return send(res, 200, { ok: true, ...selfService.issue(await body(req), req) });
+    if (url.pathname === "/api/self/claim") return send(res, 200, { ok: true, ...selfService.claim(await body(req), req) });
     if (url.pathname === "/api/logout") return send(res, 200, { admin: false }, { "set-cookie": "rs=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
 
     if (!session) return send(res, 401, { error: "Sign in to manage the raffle" });
@@ -330,7 +443,7 @@ const server = http.createServer(async (req, res) => {
     const name = url.pathname.replace("/api/admin/", "");
     const fn = Object.hasOwn(actions, name) ? actions[name] : null;
     if (!fn) return send(res, 404, { error: "Not found" });
-    const result = fn(await body(req), session);
+    const result = fn(await body(req, name === "collectorQr" ? 3 * 1024 * 1024 : 64 * 1024), session);
     save();
     return send(res, 200, { ok: true, ...result });
   } catch (e) {
