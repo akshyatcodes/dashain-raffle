@@ -1,0 +1,20 @@
+# Example deployment. Copy to docker-compose.yml next to a filled-in .env, then:  docker compose up -d
+services:
+  raffle:
+    build: .                     # or: image: registry.example.com/dashain-raffle:1.1.0
+    container_name: raffle
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - raffle-data:/data        # raffle.json, snapshots/, uploads/  (back this up)
+    ports:
+      - "127.0.0.1:8080:8080"    # put a TLS reverse proxy in front; don't expose 8080 to the internet directly
+    # --- Traefik instead of ports (remove the ports block above) ---
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.raffle.rule=Host(`raffle.example.com`)
+    #   - traefik.http.routers.raffle.tls.certresolver=le
+    #   - traefik.http.services.raffle.loadbalancer.server.port=8080
+
+volumes:
+  raffle-data:

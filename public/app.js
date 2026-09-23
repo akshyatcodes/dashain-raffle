@@ -409,7 +409,7 @@ function renderTicket(s){
 }
 function buyerMessage(s){
   const c = cfg();
-  return `Your ${c.title || "Dashain Raffle"} ticket${s.nums.length > 1 ? "s" : ""}: ${ranges(s.nums)}${s.nums.length > 1 ? ` (${s.nums.length} tickets)` : ""}\n${c.drawAt ? "Draw: " + fmtDate(c.drawAt) + " (NPT)\n" : ""}${s.paid ? `Paid ${money(saleAmount(s))}. You're in the draw.` : `Amount due: ${money(saleAmount(s))}. Your tickets enter the draw once paid.`}\nFollow the odds and the live draw at https://${c.publicUrl || location.host}\nशुभ दशैं!`;
+  return `Your ${c.title || "Dashain Raffle"} ticket${s.nums.length > 1 ? "s" : ""}: ${ranges(s.nums)}${s.nums.length > 1 ? ` (${s.nums.length} tickets)` : ""}\n${c.drawAt ? "Draw: " + fmtDate(c.drawAt) + " (NPT)\n" : ""}${s.paid ? `Paid ${money(saleAmount(s))}. You're in the draw.` : `Amount due: ${money(saleAmount(s))}. Your tickets enter the draw once paid.`}${!s.paid && colOf(s.collectorId) ? `\nPay ${colOf(s.collectorId).name}${s.method ? " by " + s.method : ""}${colOf(s.collectorId).contact ? " and let them know on " + colOf(s.collectorId).contact : ""}.` : ""}\nFollow the odds and the live draw at https://${c.publicUrl || location.host}\nशुभ दशैं!`;
 }
 $("copyMsg").onclick = () => { const s = S.lastIssued; if (!s) return;
   navigator.clipboard.writeText(buyerMessage(s)).then(() => toast("Copied. Paste it to the buyer on Slack or email."), () => toast("Copy isn't available here. Select the ticket text manually.")); };
@@ -534,7 +534,11 @@ function renderStageCtl(){
   const opts = [...S.pub.prizes].sort((a, b) => (b.order ?? 0) - (a.order ?? 0)).map(p => ({p, left:(p.qty || 1) - drawnFor(p.id)})).filter(o => o.left > 0);
   sel.innerHTML = opts.length ? opts.map(o => `<option value="${o.p.id}">${esc(o.p.name)}${o.left > 1 ? ` (${o.left} left)` : ""}</option>`).join("") : `<option value="">All prizes drawn</option>`;
   if (opts.some(o => o.p.id === prev)) sel.value = prev;
-  $("drawBtn").disabled = !opts.length || !S.pub.inDraw || S.pub.stage?.state === "rolling";
+  const phys = S.drawMode === "physical";
+  document.querySelectorAll(".stage-ctl .mode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === (S.drawMode || "random")));
+  $("manualBox").hidden = !phys; $("drawBtn").textContent = phys ? "Announce winner" : "Draw a winner";
+  $("drawBtn").disabled = !opts.length || S.pub.stage?.state === "rolling" || (phys ? !manualCheck().ok : !S.pub.inDraw);
+  renderManualInfo();
 }
 let reelTimer = null, lastKey = "", animatedDraw = null, reelBusy = false;
 const reelPool = () => S.pub.sales.filter(s => s.paid).flatMap(s => s.nums);
@@ -576,7 +580,40 @@ function slowStop(done){
   step();
 }
 function stopReel(){ clearInterval(reelTimer); clearTimeout(reelTimer); $("reel").classList.remove("rolling"); }
-$("drawBtn").onclick = () => { const id = $("drawPrize").value; if (id){ $("drawBtn").disabled = true; act("draw", {prizeId:id}); } };
+// physical draw: check the typed number against the organiser's copy of the sales before announcing
+function manualCheck(){
+  const raw = $("manualNo").value.trim(); if (!raw) return {ok:false, msg:""};
+  const m = raw.toUpperCase().match(/(\d{1,6})\s*$/); if (!m) return {ok:false, msg:"Type the number printed on the ticket."};
+  const n = +m[1], s = S.adm?.sales.find(x => !x.void && x.nums.includes(n));
+  if (!s) return {ok:false, msg:`${tno(n)} was never sold. Put it aside and draw again.`};
+  if (!s.paid) return {ok:false, msg:`${tno(n)} belongs to ${s.buyer} but isn't paid, so it can't win. Draw again.`};
+  const w = S.pub.draws.find(d => d.ticket === n); if (w) return {ok:false, msg:`${tno(n)} already won ${w.prizeName}. Draw again.`};
+  return {ok:true, n, msg:`${tno(n)} · ${s.buyer}${s.dept ? " (" + s.dept + ")" : ""} · paid. Ready to announce.`};
+}
+function renderManualInfo(){
+  const el = $("manualInfo"), c = S.drawMode === "physical" ? manualCheck() : {msg:""};
+  el.hidden = !c.msg; el.textContent = c.msg; el.className = "manual-info " + (c.ok ? "ok" : "bad");
+}
+document.querySelectorAll(".stage-ctl .mode button").forEach(b => b.onclick = () => { S.drawMode = b.dataset.mode; renderStageCtl(); if (S.drawMode === "physical") $("manualNo").focus(); });
+$("manualNo").oninput = () => renderStageCtl();
+$("manualNo").onkeydown = e => { if (e.key === "Enter" && !$("drawBtn").disabled) $("drawBtn").click(); };
+$("drawBtn").onclick = async () => {
+  const id = $("drawPrize").value; if (!id) return;
+  $("drawBtn").disabled = true;
+  if (S.drawMode === "physical"){ const c = manualCheck(); if (!c.ok) return renderStageCtl();
+    const j = await act("drawManual", {prizeId:id, ticket:c.n}); if (j) $("manualNo").value = ""; renderStageCtl(); }
+  else act("draw", {prizeId:id});
+};
+$("printSlips").onclick = () => {
+  const won = new Set(S.pub.draws.map(d => d.ticket));
+  const items = (S.adm?.sales || []).filter(s => !s.void && s.paid).flatMap(s => s.nums.filter(n => !won.has(n)).map(n => ({n, name:s.buyer}))).sort((a, b) => a.n - b.n);
+  if (!items.length) return toast("No paid tickets to print yet.");
+  const pages = []; for (let i = 0; i < items.length; i += 40) pages.push(`<div class="slipsheet">${items.slice(i, i + 40).map(it => `<div class="slip"><div class="n">${esc(tno(it.n))}</div><div class="b">${esc(it.name)}</div></div>`).join("")}</div>`);
+  $("printRoot").innerHTML = pages.join("");
+  toast(`${items.length} slips, ${pages.length} page${pages.length > 1 ? "s" : ""}. Cut, fold and drop them in the bowl.`);
+  const go = () => setTimeout(() => window.print(), 150);
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(go, go);
+};
 $("stageReset").onclick = () => act("stageReset", {}, "Stage cleared");
 
 function renderPrizeBoard(){
@@ -702,6 +739,7 @@ $("popX").onclick = hidePop;
 /* ---------------- collectors (shared) ---------------- */
 const METHODS = ["Cash","eSewa","Khalti","Bank transfer","Salary deduction","Other"];
 const collectors = () => cfg().collectors || [];
+const colOf = id => (S.adm?.config.collectors || collectors()).find(c => c.id === id);
 const colName = id => (S.adm?.config.collectors || collectors()).find(c => c.id === id)?.name || "";
 const srcChip = s => s.source === "book" ? '<span class="chip">Paper</span>' : s.source === "self" ? '<span class="chip gold">Self-service</span>' : '<span class="chip">Digital</span>';
 function fillCollectorSelect(colId, methId){
@@ -799,13 +837,28 @@ function renderReceipt(){
       </div></div>
       ${r.claimedAt ? `<p class="hint">Thanks! You told us you paid${r.txn ? ` (reference ${esc(r.txn)})` : ""}. Finance will confirm shortly and this page updates by itself.</p>`
         : `<form class="claim" id="claimForm"><input type="text" id="claimTxn" maxlength="60" placeholder="${r.method === "Cash" ? "Who did you hand it to? (optional)" : "Transaction ID from " + esc(r.method || "your payment app")}"><button class="btn dark" type="submit">I've paid</button></form>`}` : ""}
+    ${pending ? tellBlock(r) : ""}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn" data-copy>Copy my receipt link</button>
       <button type="button" class="btn ghost" data-new>Reserve more tickets</button>
     </div>
     <p class="hint">Bookmark this page. It's your receipt, and it updates live when your payment is confirmed.</p>`;
 }
+const chatLabel = u => /slack/i.test(u) ? "Open Slack" : /teams|msteams/i.test(u) ? "Open Teams" : /^mailto:/i.test(u) ? "Send email" : /whatsapp|wa\.me/i.test(u) ? "Open WhatsApp" : "Open chat";
+function paidMessage(r){
+  const c = r.collector, first = (c?.name || "").split(/[ ,]/)[0];
+  return `Hi${first ? " " + first : ""}, I've ${r.method === "Cash" ? "handed you" : "sent"} ${money(r.amount)}${r.method && r.method !== "Cash" ? " via " + r.method : ""} for my ${cfg().title || "raffle"} ticket${r.nums.length > 1 ? "s" : ""} ${ranges(r.nums)}.\n`
+    + `Reference: ${tno(r.nums[0])}${r.txn ? " · Transaction ID: " + r.txn : ""}\nReceipt: ${location.origin}/?r=${encodeURIComponent(r.token)}#buy\nThanks! ${r.buyer}`;
+}
+function tellBlock(r){
+  const c = r.collector; if (!c) return "";
+  return `<div class="tell"><div class="eyebrow">Let ${esc(c.name)} know</div>
+    <p class="hint" style="margin:0">After paying, send this on ${c.contact ? esc(c.contact) : "Slack, Teams or your usual office chat"} so they can confirm it quickly.</p>
+    <pre id="tellMsg">${esc(paidMessage(r))}</pre>
+    <div class="acts"><button type="button" class="btn dark" data-tell>Copy message</button>${c.contactUrl ? `<a class="btn" href="${esc(c.contactUrl)}" target="_blank" rel="noopener">${esc(chatLabel(c.contactUrl))}</a>` : ""}</div></div>`;
+}
 $("receipt").onclick = e => {
+  if (e.target.closest("[data-tell]") && S.receipt) navigator.clipboard.writeText(paidMessage(S.receipt)).then(() => toast("Copied. Paste it in your chat with the collector."), () => toast("Copy isn't available. Select the message text instead."));
   if (e.target.closest("[data-copy]")) navigator.clipboard.writeText(location.origin + "/?r=" + encodeURIComponent(S.receiptToken) + "#buy").then(() => toast("Receipt link copied"), () => toast("Copy isn't available. Bookmark this page instead."));
   if (e.target.closest("[data-new]")){ S.receiptToken = null; S.receipt = null; try { history.replaceState(null, "", "/#buy"); } catch {} renderBuy(); }
 };
@@ -855,13 +908,16 @@ const colRow = c => `<div class="col-row" data-id="${esc(c.id || "")}">
   <label class="f">Name<input type="text" data-k="name" id="cn-${esc(c.id || Math.random().toString(36).slice(2))}" value="${esc(c.name || "")}" maxlength="50" placeholder="e.g. Sunita, HR desk"></label>
   <label class="f">Type<select data-k="kind"><option value="finance" ${c.kind === "finance" ? "selected" : ""}>Finance</option><option value="designated" ${c.kind !== "finance" ? "selected" : ""}>Designated person</option></select></label>
   <div class="meth">${METHODS.map(m => `<label class="check"><input type="checkbox" data-m="${esc(m)}" ${(c.methods || []).includes(m) ? "checked" : ""}> ${esc(m)}</label>`).join("")}</div>
+  <label class="f">How to reach them<input type="text" data-k="contact" value="${esc(c.contact || "")}" maxlength="80" placeholder="e.g. @sunita on Slack, or #dashain-raffle"></label>
+  <label class="f">Chat link (optional)<input type="text" data-k="contactUrl" value="${esc(c.contactUrl || "")}" maxlength="300" placeholder="https://… Slack, Teams, mailto:"></label>
   <label class="f" style="grid-column:1/-1">Note for buyers (optional)<input type="text" data-k="note" value="${esc(c.note || "")}" maxlength="160" placeholder="e.g. Desk 4, 2nd floor. Scan the QR in eSewa."></label>
   <div class="qr">${c.qrUrl ? `<img src="${esc(c.qrUrl)}" alt="QR for ${esc(c.name)}">` : `<span class="none">No QR yet</span>`}
     ${c.id ? `<label class="btn sm">Upload QR<input type="file" accept="image/png,image/jpeg,image/webp" data-qr="${esc(c.id)}" hidden></label>${c.qrUrl ? `<button type="button" class="btn sm ghost" data-qrrm="${esc(c.id)}">Remove QR</button>` : ""}` : `<span class="hint">Save collectors first, then upload the QR.</span>`}
     <button type="button" class="btn sm ghost danger" data-colrm style="margin-left:auto">Remove collector</button></div>
 </div>`;
 const readCollectors = () => [...$("colRows").querySelectorAll(".col-row")].map(r => ({id:r.dataset.id || undefined, name:r.querySelector('[data-k=name]').value,
-  kind:r.querySelector('[data-k=kind]').value, note:r.querySelector('[data-k=note]').value, methods:[...r.querySelectorAll("[data-m]:checked")].map(i => i.dataset.m)}));
+  kind:r.querySelector('[data-k=kind]').value, note:r.querySelector('[data-k=note]').value,
+  contact:r.querySelector('[data-k=contact]').value, contactUrl:r.querySelector('[data-k=contactUrl]').value, methods:[...r.querySelectorAll("[data-m]:checked")].map(i => i.dataset.m)}));
 $("colRows").oninput = () => { colDirty = true; };
 $("colRows").onclick = e => { const rm = e.target.closest("[data-colrm]"); if (rm){ rm.closest(".col-row").remove(); colDirty = true; }
   const q = e.target.closest("[data-qrrm]"); if (q) act("collectorQr", {id:q.dataset.qrrm, remove:true}, "QR removed").then(() => renderCollectors(true)); };
@@ -888,7 +944,7 @@ async function load(){
       setLive(true, "Live");
       const fresh = had ? S.pub.sales.filter(s => !prevIds.has(s.id)) : [];
       renderAll(); fetchReceipt();
-      if (fresh.length && S.tab !== "manage"){ queuePops(fresh); if (S.tab === "board") burst(innerWidth / 2, 160, 36); }
+      if (fresh.length && S.tab !== "manage" && S.tab !== "buy"){ queuePops(fresh); if (S.tab === "board") burst(innerWidth / 2, 160, 36); }
     } catch { setLive(false, "Reconnecting…"); }
   })();
   await loading; loading = null;

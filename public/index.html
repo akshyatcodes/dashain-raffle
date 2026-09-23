@@ -161,9 +161,18 @@
       <div class="note" id="stNote">Keep this screen open. It updates the moment management draws a winner.</div>
       <div class="stage-tally"><span>In the draw <b id="tIn">0</b></span><span>Prizes left <b id="tLeft">0</b></span><span>Drawn <b id="tDrawn">0</b></span><button type="button" class="list-toggle" id="listToggle" aria-expanded="false" aria-controls="prizeBoard">Show prizes &amp; winners</button></div>
       <div class="stage-ctl" id="stageCtl" hidden>
+        <div class="mode" role="group" aria-label="Draw method">
+          <button type="button" data-mode="random" aria-pressed="true">Random pick</button>
+          <button type="button" data-mode="physical" aria-pressed="false">Physical ticket</button>
+        </div>
         <select id="drawPrize" aria-label="Prize to draw"></select>
+        <span class="manual" id="manualBox" hidden>
+          <input type="text" id="manualNo" placeholder="Ticket number, e.g. DSH-0042" autocomplete="off" aria-label="Ticket number drawn">
+        </span>
         <button class="btn primary" id="drawBtn">Draw a winner</button>
+        <button class="btn sm" id="printSlips" title="Print one slip per paid ticket for the draw bowl">Print draw slips</button>
         <button class="btn sm" id="stageReset" title="Clear the stage if a draw got stuck">Reset stage</button>
+        <div class="manual-info" id="manualInfo" hidden></div>
       </div>
     </div>
     <section class="block prize-board" id="prizeBoard" hidden aria-labelledby="h-pb">

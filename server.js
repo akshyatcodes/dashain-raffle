@@ -109,7 +109,9 @@ function pickCollector(b) {
   const method = str(b.method, 30); if (!c.methods.includes(method)) throw bad(`${c.name} doesn't take ${method || "that payment method"}`);
   return { collectorId: c.id, method };
 }
-const collectorPublic = c => ({ id: c.id, name: c.name, kind: c.kind, methods: c.methods, note: c.note, qr: c.qr ? "/uploads/" + c.qr : null });
+const collectorPublic = c => ({ id: c.id, name: c.name, kind: c.kind, methods: c.methods, note: c.note, contact: c.contact || "", contactUrl: c.contactUrl || "", qr: c.qr ? "/uploads/" + c.qr : null });
+// links buyers can follow to message a collector: web links, email, and the Slack / Teams app schemes only
+const safeLink = v => { const u = str(v, 300); return /^(https:\/\/|mailto:|slack:\/\/|msteams:\/\/)/i.test(u) ? u : ""; };
 function allocate(count) { const from = db.counter; db.counter += count; return Array.from({ length: count }, (_, i) => from + i); }
 function parseNums(spec) {
   const out = new Set();
@@ -298,7 +300,8 @@ const actions = {
       const methods = (Array.isArray(x.methods) ? x.methods : []).filter(m => METHODS.includes(m));
       const name = str(x.name, 50); if (!name) throw bad("Every collector needs a name");
       if (!methods.length) throw bad(`Pick at least one payment method for ${name}`);
-      return { id, name, kind: x.kind === "finance" ? "finance" : "designated", methods, note: str(x.note, 160), qr: old.get(id)?.qr || null };
+      if (x.contactUrl && !safeLink(x.contactUrl)) throw bad(`The chat link for ${name} must start with https://, mailto:, slack:// or msteams://`);
+      return { id, name, kind: x.kind === "finance" ? "finance" : "designated", methods, note: str(x.note, 160), contact: str(x.contact, 80), contactUrl: safeLink(x.contactUrl), qr: old.get(id)?.qr || null };
     });
     if (!list.length) throw bad("Keep at least one collector so buyers know who to pay");
     for (const [id, c] of old) if (!list.some(x => x.id === id) && c.qr) fs.rm(path.join(UPLOAD_DIR, c.qr), () => {});
@@ -333,6 +336,21 @@ const actions = {
       audit(who.name, `drew ${pick.n} for ${prize.name} from ${pool.length} tickets`); save();
     }, ROLL_MS);
     audit(who.name, `started draw for ${prize.name}`); return {};
+  },
+  // physical draw: an organiser pulls a ticket from the bowl and types its number; the server checks it can win
+  drawManual(b, who) {
+    if (db.stage.state === "rolling") throw bad("A random draw is in progress. Wait for it to finish.", 409);
+    const prize = db.prizes.find(p => p.id === b.prizeId); if (!prize) throw bad("Pick a prize");
+    if (db.draws.filter(d => d.prizeId === prize.id).length >= prize.qty) throw bad("That prize has been fully drawn");
+    const m = String(b.ticket || "").toUpperCase().match(/(\d{1,6})\s*$/); if (!m) throw bad("Type the number printed on the ticket, like DSH-0042");
+    const n = +m[1], s = db.sales.find(x => x.nums.includes(n) && !x.void);
+    if (!s) throw bad(`Ticket ${n} was never sold (or was voided). Put it aside and draw again.`);
+    if (!s.paid) throw bad(`Ticket ${n} belongs to ${s.buyer} but isn't paid, so it can't win. Draw again.`);
+    const prev = db.draws.find(d => d.ticket === n); if (prev) throw bad(`Ticket ${n} already won ${prev.prizeName}. Draw again.`);
+    const d = { id: uid("d"), prizeId: prize.id, prizeName: prize.name, ticket: n, saleId: s.id, at: new Date().toISOString(), by: who.name, mode: "physical", poolSize: eligible().length };
+    db.draws.push(d);
+    db.stage = { state: "revealed", prizeId: prize.id, prizeName: prize.name, ticket: n, drawId: d.id, at: d.at };
+    audit(who.name, `physical draw: ticket ${n} for ${prize.name}`); return { draw: d };
   },
   drawRemove(b, who) {
     const d = db.draws.find(x => x.id === b.id); if (!d) throw bad("Result not found", 404);
