@@ -439,4 +439,3 @@ body.is-finance .org-only{display:none!important}
 .unlock-row{display:flex;gap:8px;flex-wrap:wrap}
 .unlock-row input{flex:1 1 180px;min-width:0;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;background:var(--paper-2,var(--paper));color:inherit;text-transform:uppercase;letter-spacing:.06em}
 .unlock.panel{border-style:solid}
-.stat.locked b{font-size:1.2rem;padding-top:6px}

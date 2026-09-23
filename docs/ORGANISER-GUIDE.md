@@ -29,8 +29,8 @@ Do this signed in as **finance**.
    - **Chat link (optional):** a Slack, Teams or `mailto:` link. It shows as a button on the buyer's receipt.
    - **QR code:** save the collector first, then upload their eSewa, Khalti or bank QR (PNG, JPG or WebP, under 2 MB).
 5. **Settings → Self-service** (optional):
-   - **Company code** (finance only): ticket prices and payment collectors are hidden on the public site until a visitor enters this code. It is remembered on their device for 30 days; changing the code locks everyone out again. Leave it blank to show prices to everyone. The site ships with the test code `ODIN2082`, so change it before launch.
-   - Tick **Open self-service** and set an **access code**. Share the code on the company channel, not publicly.
+   - **Company code** (finance only): the one code for staff. Ticket prices, payment collectors and self-service reservations are locked on the public site until a visitor enters it. It is remembered on their device for 30 days; changing the code locks everyone out again. Share it on the company channel, not publicly. The current test code is `DASHAIN2082`; change it before launch.
+   - Tick **Open self-service** (needs a company code to be set).
    - **Hold time:** how long an unpaid reservation is kept before it lapses. Default 48 hours.
    - **Most tickets in one reservation:** default 21.
 6. Share the site link. Put **Draw stage** on the office screen.
@@ -52,7 +52,7 @@ Do this signed in as **finance**.
 3. Record the sale by typing the stub numbers, e.g. `12-15, 18`, with the buyer's details. Unsold paper tickets never enter the draw.
 
 **Self-service (Get tickets):**
-1. Staff reserve tickets with the access code and choose a collector and payment method.
+1. Staff enter the company code, reserve tickets and choose a collector and payment method.
 2. Their receipt page shows the amount, the collector's QR and a **reference** (their first ticket number) to put in the payment remarks.
 3. It also shows a ready-made **"Let them know" message** to copy into Slack or Teams, plus the collector's chat button.
 4. They tap **I've paid** and can add a transaction ID. The receipt updates by itself once finance confirms.

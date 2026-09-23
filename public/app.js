@@ -122,9 +122,8 @@ function renderBoard(){
   $("stPrizesSub").textContent = S.pub.draws.length ? `${P} still to be won` : "to be won";
   $("stOdds").textContent = N && P ? pct(pWin(1, N, P)) : "—";
   const bd = bestDeal(), bs = bundles(), locked = !!S.pub.locked;
-  $("unlockHero").hidden = !locked; $("stPrice").parentElement.classList.toggle("locked", locked);
-  if (locked){ $("stPrice").textContent = "Code needed"; $("stPriceSub").textContent = "enter the company code below"; }
-  else if (bd){ $("stPrice").textContent = `${bd.qty} for ${Number(bd.price).toLocaleString("en-IN")}`; $("stPriceSub").textContent = `${money(Math.round(bd.price / bd.qty))} a ticket` + (bs[0].qty === 1 ? ` · save ${money(bs[0].price * bd.qty - bd.price)}` : ""); }
+  $("unlockHero").hidden = !locked; $("stPrice").parentElement.hidden = locked;
+  if (bd){ $("stPrice").textContent = `${bd.qty} for ${Number(bd.price).toLocaleString("en-IN")}`; $("stPriceSub").textContent = `${money(Math.round(bd.price / bd.qty))} a ticket` + (bs[0].qty === 1 ? ` · save ${money(bs[0].price * bd.qty - bd.price)}` : ""); }
   else { $("stPrice").textContent = bs[0] ? money(bs[0].price) : "—"; $("stPriceSub").textContent = "per ticket"; }
   $("tiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" class="tier ${bd && b.qty === bd.qty ? "best" : ""}" data-q="${b.qty}"><span class="q">${b.qty} ticket${b.qty > 1 ? "s" : ""}</span><span class="p">${esc(money(b.price))}</span><span class="e">${b.qty > 1 ? esc(money(Math.round(b.price / b.qty))) + " each" : "single"}</span></button>`).join("") : "";
   $("calcTiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" data-q="${b.qty}" aria-pressed="false">${b.qty} · ${esc(money(b.price))}</button>`).join("") : "";
@@ -338,14 +337,14 @@ function fillSettings(){
   $("cDraw").value = npt(c.drawAt); $("cClose").value = npt(c.salesCloseAt);
   const si = (S.adm?.config || c).selfIssue || {};
   $("cCompany").value = S.adm?.config?.companyCode ?? "";
-  $("siOn").checked = !!si.enabled; $("siCode").value = si.code || ""; $("siHold").value = si.holdHours || 48; $("siMax").value = si.maxPer || 21;
+  $("siOn").checked = !!si.enabled; $("siHold").value = si.holdHours || 48; $("siMax").value = si.maxPer || 21;
 }
 $("sub-settings").onsubmit = e => {
   e.preventDefault(); const v = $("cDraw").value;
   act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows(), companyCode:$("cCompany").value} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
     cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null,
     salesCloseAt:$("cClose").value ? $("cClose").value + ":00+05:45" : null,
-    selfIssue:{enabled:$("siOn").checked, code:$("siCode").value, holdHours:$("siHold").value, maxPer:$("siMax").value}}, "Settings saved");
+    selfIssue:{enabled:$("siOn").checked, holdHours:$("siHold").value, maxPer:$("siMax").value}}, "Settings saved");
 };
 
 function renderBundleRows(list){
@@ -762,8 +761,6 @@ async function unlock(inputId, errId, btn){
   btn.disabled = true;
   try {
     await api("/api/unlock", {code});
-    try { localStorage.setItem("raffle.code", code); } catch {}
-    if (!$("bCode").value) $("bCode").value = code;
     await load(); toast("Prices and payment details unlocked");
   } catch (e){ $(errId).textContent = e.message; }
   finally { btn.disabled = false; }
@@ -773,7 +770,6 @@ $("unlockBuy").onsubmit = e => { e.preventDefault(); unlock("ucBuy", "ucBuyErr",
 
 /* ---------------- self-service ---------------- */
 S.receiptToken = new URLSearchParams(location.search).get("r"); S.receipt = null;
-try { $("bCode").value = localStorage.getItem("raffle.code") || ""; } catch {}
 let buyCollector = null;
 function renderBuy(){
   const open = salesOpen(), on = selfOn(), closed = $("buyClosed");
@@ -815,9 +811,8 @@ $("buyForm").onsubmit = async e => {
   e.preventDefault(); $("bErr").textContent = "";
   const btn = $("bSubmit"); btn.disabled = true; btn.textContent = "Reserving…";
   try {
-    const j = await api("/api/self/issue", {code:$("bCode").value, buyer:$("bName").value, dept:$("bDept").value, phone:$("bPhone").value, count:$("bCount").value,
+    const j = await api("/api/self/issue", {buyer:$("bName").value, dept:$("bDept").value, phone:$("bPhone").value, count:$("bCount").value,
       collectorId:buyCollector, method:$("bMethod").value, anon:$("bAnon").checked});
-    try { localStorage.setItem("raffle.code", $("bCode").value.trim()); } catch {}
     S.receipt = j.receipt; S.receiptToken = j.receipt.token;
     try { history.replaceState(null, "", "?r=" + encodeURIComponent(S.receiptToken) + "#buy"); } catch {}
     renderBuy(); burst(innerWidth / 2, 200, 80); scrollTo({top:0, behavior:reduced ? "auto" : "smooth"});

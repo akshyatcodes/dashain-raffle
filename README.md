@@ -3,7 +3,7 @@
 A self-hosted company raffle website. One small Node server (no npm dependencies) and one data folder.
 
 - **Live board** (public): prizes, live odds, bundle prices, team leaderboard, recent-purchase ticker, "find my tickets", winners.
-- **Get tickets** (public, access code): staff reserve their own tickets, pay a collector (cash, eSewa, Khalti, bank, QR) and get a live receipt.
+- **Get tickets** (public, company code): staff reserve their own tickets, pay a collector (cash, eSewa, Khalti, bank, QR) and get a live receipt.
 - **Draw stage** (for the projector): random draw with a synced reel on every screen, or a **physical draw**, where an organiser types the number pulled from the bowl. There is also a prizes-and-winners list.
 - **Organisers console** (password): sell tickets, print paper ticket books and draw slips, keep the sales ledger, manage prizes and settings, and run the draw.
 - **Finance role** (separate password): confirm payments from a queue, set prices and collectors, upload payment QR codes, see money totals and export CSV.
@@ -69,9 +69,9 @@ uploads/             collector QR images
 
 ## Security model (short version)
 
-- **Public:** board, draw stage, receipts (the receipt link acts as the key), and the self-service form, which needs the access code.
+- **Public:** board, draw stage, receipts (the receipt link acts as the key), and the self-service form. Prices, payment collectors and the form itself are locked until the visitor enters the company code (signed 30-day cookie; `POST /api/unlock`).
   - Buyer names are shortened to "First L." on public pages. A buyer can choose to show as "Someone from <team>".
-  - The access code is never sent to the browser.
+  - The company code is never sent to the browser; the cookie is an HMAC of it, so changing the code locks everyone out.
 - **Organisers:** everything except money controls. Sales they record are always saved **unpaid**.
 - **Finance:** payment status, voiding paid sales, prices, collectors and QR codes, totals, CSV. The server enforces this. Hiding it in the page is just convenience.
 - **Draws:** random draws use `crypto.randomInt` on the server, over paid, non-void tickets that haven't already won. Physical draws check the ticket is sold, paid and not already a winner.

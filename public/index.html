@@ -132,7 +132,6 @@
           <h2>Get your raffle tickets</h2>
           <p class="hint" id="buyIntro">Reserve your numbers now, then pay the collector you pick. Your tickets enter the draw as soon as finance confirms the payment.</p>
         </div>
-        <label class="f">Access code<input type="text" id="bCode" required autocomplete="off" placeholder="Shared on the company channel"></label>
         <div class="frow">
           <label class="f">Your full name<input type="text" id="bName" required maxlength="80" autocomplete="name"></label>
           <label class="f">Team<input type="text" id="bDept" list="deptList" maxlength="40"></label>
@@ -151,7 +150,7 @@
         <button class="btn primary" type="submit" id="bSubmit">Reserve my tickets</button>
       </form>
       <form class="panel unlock" id="unlockBuy" hidden autocomplete="off">
-        <div><div class="eyebrow">Company code</div><h2>Enter your company code</h2><p class="hint">Prices and payment details are only shown to staff. The code is shared on the company channel; ask an organiser if you don't have it.</p></div>
+        <div><div class="eyebrow">Company code</div><h2>Enter your company code</h2><p class="hint">Prices, payment details and reservations are for staff only. The code is shared on the company channel; ask an organiser if you don't have it.</p></div>
         <div class="unlock-row"><input type="text" id="ucBuy" maxlength="40" placeholder="Company code" aria-label="Company code" required><button class="btn primary" type="submit">Continue</button></div>
         <div class="err" id="ucBuyErr" role="alert"></div>
       </form>
@@ -345,18 +344,17 @@
         </div>
         <fieldset class="bundles fin">
           <legend>Company code</legend>
-          <p class="hint">Ticket prices and payment collectors stay hidden on the public site until a visitor enters this code. Changing it locks everyone out again until they re-enter it. Leave blank to show prices to everyone.</p>
+          <p class="hint">One code for staff: ticket prices, payment collectors and self-service reservations stay locked on the public site until a visitor enters it. Changing it locks everyone out again until they re-enter it. Leave blank to show prices to everyone.</p>
           <label class="f" style="max-width:260px">Company code<input type="text" id="cCompany" maxlength="40" autocomplete="off"></label>
         </fieldset>
         <fieldset class="bundles">
           <legend>Self-service tickets</legend>
-          <p class="hint">Let staff reserve tickets from this site and pay a collector. Reservations stay out of the draw until finance confirms the payment, and unpaid ones lapse after the hold time.</p>
+          <p class="hint">Let staff reserve tickets from this site and pay a collector. Reserving needs the company code above. Reservations stay out of the draw until finance confirms the payment, and unpaid ones lapse after the hold time.</p>
           <label class="check"><input type="checkbox" id="siOn"> Open self-service</label>
           <div class="frow">
-            <label class="f">Access code (share it on the company channel)<input type="text" id="siCode" maxlength="40" autocomplete="off"></label>
             <label class="f">Hold unpaid reservations for (hours)<input type="number" id="siHold" min="1" max="336"></label>
+            <label class="f">Most tickets in one reservation<input type="number" id="siMax" min="1" max="100"></label>
           </div>
-          <label class="f" style="max-width:260px">Most tickets in one reservation<input type="number" id="siMax" min="1" max="100"></label>
         </fieldset>
         <div><button class="btn primary" type="submit">Save settings</button></div>
       </form>

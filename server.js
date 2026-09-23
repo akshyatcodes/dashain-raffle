@@ -43,6 +43,8 @@ db.config.salesCloseAt ??= null;
 db.config.selfIssue = { enabled: false, code: "", holdHours: 48, maxPer: 21, ...(db.config.selfIssue || {}) };
 // company code: prices and payment collectors are hidden from the public board until a visitor enters it (empty = no gate)
 db.config.companyCode ??= "ODIN2082";
+const migratedCode = !!db.config.selfIssue.code;
+if (migratedCode) { db.config.companyCode = db.config.selfIssue.code; delete db.config.selfIssue.code; }
 db.config.collectors ??= [{ id: "c-finance", name: "Finance team", kind: "finance", methods: ["Cash", "eSewa", "Khalti", "Bank transfer"], note: "", qr: null }];
 // pricing: bundles[] is the price list; `price` mirrors the 1-ticket tier. Older sales keep what they were charged.
 if (!Array.isArray(db.config.bundles) || !db.config.bundles.length) db.config.bundles = [{ qty: 1, price: +db.config.price || 0 }];
@@ -69,6 +71,7 @@ function save() {
   }
   broadcast();
 }
+if (migratedCode) save(); // persist the one-code migration so the on-disk file matches memory
 function audit(who, what) { db.audit.push({ at: new Date().toISOString(), who, what }); if (db.audit.length > 1000) db.audit.splice(0, db.audit.length - 1000); }
 const uid = p => p + "-" + crypto.randomBytes(5).toString("hex");
 
@@ -307,9 +310,9 @@ const actions = {
       c.companyCode = code;
     }
     if (b.selfIssue) {
-      const si = b.selfIssue, code = str(si.code, 40);
-      if (si.enabled && code.length < 4) throw bad("Set an access code of at least 4 characters before opening self-service");
-      c.selfIssue = { enabled: !!si.enabled, code, holdHours: int(si.holdHours, 1, 336), maxPer: int(si.maxPer, 1, 100) };
+      const si = b.selfIssue;
+      if (si.enabled && !(c.companyCode || "").trim()) throw bad("Set a company code before opening self-service, so only staff can reserve tickets");
+      c.selfIssue = { enabled: !!si.enabled, holdHours: int(si.holdHours, 1, 336), maxPer: int(si.maxPer, 1, 100) };
     }
     audit(who.name, "updated settings"); return { config: c };
   },
@@ -382,13 +385,16 @@ const actions = {
 };
 
 /* ---------------- self-service (public, access-code gated) ---------------- */
-const selfHits = new Map();
-function selfRate(req, max) {
-  const ip = clientIp(req), now = Date.now(), a = selfHits.get(ip) || { n: 0, reset: now + 3600e3 };
+const selfHits = new Map(), unlockHits = new Map();
+function rateHit(map, req, max, msg) {
+  const ip = clientIp(req), now = Date.now(), a = map.get(ip) || { n: 0, reset: now + 3600e3 };
   if (now > a.reset) { a.n = 0; a.reset = now + 3600e3; }
-  if (a.n >= max) throw bad("Too many requests from this device. Try again in an hour or ask an organiser.", 429);
-  a.n++; selfHits.set(ip, a);
+  if (a.n >= max) throw bad(msg, 429);
+  a.n++; map.set(ip, a);
 }
+const selfRate = (req, max) => rateHit(selfHits, req, max, "Too many requests from this device. Try again in an hour or ask an organiser.");
+// the whole office shares one outbound IP, so wrong company codes get their own generous bucket (failures only)
+const unlockRate = req => rateHit(unlockHits, req, 60, "Too many wrong codes from this network. Try again in an hour or ask an organiser.");
 const receiptOf = s => {
   const c = (db.config.collectors || []).find(x => x.id === s.collectorId);
   return { token: s.token, buyer: s.buyer, dept: s.dept, nums: s.nums, amount: s.amount, pricing: s.pricing, method: s.method, paid: s.paid, void: s.void,
@@ -399,10 +405,7 @@ const selfService = {
     const si = db.config.selfIssue;
     if (!si.enabled) throw bad("Self-service tickets are switched off. Ask an organiser.", 403);
     assertOpen();
-    const code = String(b.code || "").trim().toLowerCase();
-    if (!code || !crypto.timingSafeEqual(crypto.createHash("sha256").update(code).digest(), crypto.createHash("sha256").update(si.code.trim().toLowerCase()).digest())) {
-      selfRate(req, 20); throw bad("That access code isn't right. It's shared on the company channel.", 403);
-    }
+    if (!unlocked(req)) throw bad("Enter the company code first. It's shared on the company channel.", 403);
     selfRate(req, 8);
     const buyer = str(b.buyer, 80); if (buyer.length < 2) throw bad("Enter your full name");
     const count = int(b.count, 1, si.maxPer); checkLimits(buyer, count);
@@ -477,7 +480,7 @@ const server = http.createServer(async (req, res) => {
       const b = await body(req), code = String(b.code || "").trim().toLowerCase();
       if (!gateOn()) return send(res, 200, { ok: true, ...publicState(req) });
       const want = crypto.createHash("sha256").update(db.config.companyCode.trim().toLowerCase()).digest();
-      if (!code || !crypto.timingSafeEqual(crypto.createHash("sha256").update(code).digest(), want)) { selfRate(req, 20); return send(res, 403, { error: "That company code isn't right. Ask your organiser or check the company channel." }); }
+      if (!code || !crypto.timingSafeEqual(crypto.createHash("sha256").update(code).digest(), want)) { unlockRate(req); return send(res, 403, { error: "That company code isn't right. Ask your organiser or check the company channel." }); }
       return send(res, 200, { ok: true, ...publicState(req, true) }, { "set-cookie": `rc=${codeSig(db.config.companyCode)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${30 * 86400}` });
     }
     if (url.pathname === "/api/self/issue") return send(res, 200, { ok: true, ...selfService.issue(await body(req), req) });
