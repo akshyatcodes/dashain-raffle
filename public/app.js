@@ -60,6 +60,7 @@ function setTab(t){
   for (const b of document.querySelectorAll(".tab")) b.setAttribute("aria-selected", b.dataset.tab === t);
   for (const v of ["board","draw","manage"]) $("view-" + v).hidden = v !== t;
   try { history.replaceState(null, "", "#" + t); } catch {}
+  renderTicker();
   if (t === "draw") requestAnimationFrame(() => stageSky.size());
   if (t === "board") requestAnimationFrame(() => heroSky.size());
 }
@@ -534,21 +535,74 @@ function fxLoop(){
 }
 function celebrate(){ const r = $("reel").getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, 140); setTimeout(() => burst(innerWidth * .2, innerHeight * .3, 70), 250); setTimeout(() => burst(innerWidth * .8, innerHeight * .3, 70), 450); }
 
+
+/* ---------------- live ticker + purchase pops ---------------- */
+const nptDay = iso => new Intl.DateTimeFormat("en-CA", {timeZone:TZ}).format(new Date(iso));
+let tickerKey = "";
+function renderTicker(){
+  const el = $("ticker"), show = S.tab !== "manage" && S.pub.sales.length > 0;
+  el.hidden = !show; if (!show) return;
+  const sales = [...S.pub.sales].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const recent = sales.slice(0, 14);
+  const key = recent.map(s => s.id).join() + "|" + S.pub.inDraw + "|" + prizesLeft() + "|" + (cfg().drawAt || "");
+  if (key === tickerKey) return; tickerKey = key;
+  const today = nptDay(new Date().toISOString()), hourAgo = Date.now() - 3600e3;
+  const tToday = sales.filter(s => nptDay(s.at) === today).reduce((a, s) => a + s.nums.length, 0);
+  const tHour = sales.filter(s => new Date(s.at) > hourAgo).reduce((a, s) => a + s.nums.length, 0);
+  const by = {}; for (const s of sales) if (s.dept) by[s.dept] = (by[s.dept] || 0) + s.nums.length;
+  const top = Object.entries(by).sort((a, b) => b[1] - a[1])[0];
+  const N = S.pub.inDraw, days = cfg().drawAt ? Math.ceil((new Date(cfg().drawAt) - Date.now()) / 86400e3) : null;
+  const stats = [
+    tHour ? `<b>${tHour}</b> tickets sold in the last hour` : tToday ? `<b>${tToday}</b> tickets sold today` : null,
+    N && sortedPrizes()[0] ? `Grand prize odds now <b>1 in ${N.toLocaleString("en-IN")}</b> and shrinking` : null,
+    top ? `${esc(top[0])} leads with <b>${top[1]}</b> tickets. Is your team next?` : null,
+    days != null && days > 0 ? `<b>${days}</b> day${days > 1 ? "s" : ""} until the live draw` : null,
+    prizesLeft() ? `<b>${prizesLeft()}</b> prizes still up for grabs` : null,
+  ].filter(Boolean);
+  const kite = `<svg width="13" height="15" viewBox="0 0 30 34" aria-hidden="true"><path d="M15 1 L28 13 L15 25 L2 13 Z" fill="#FFB930"/><path d="M15 1 L15 25 M2 13 L28 13" stroke="#C4122F" stroke-width="2"/></svg>`;
+  const items = []; let si = 0;
+  recent.forEach((s, i) => {
+    items.push(`<span class="tk">${kite}<b>${esc(s.name)}</b>${s.dept ? ` · ${esc(s.dept)}` : ""} got <span class="n">${s.nums.length}</span> ticket${s.nums.length > 1 ? "s" : ""} <span class="tm" data-at="${esc(s.at)}">${ago(s.at)}</span></span>`);
+    if (i % 3 === 2 && stats.length) items.push(`<span class="tk tk-stat">${stats[si++ % stats.length]}</span>`);
+  });
+  if (recent.length < 3 && stats.length) items.push(`<span class="tk tk-stat">${stats[0]}</span>`);
+  const html = items.join(""), track = $("tickerTrack");
+  track.innerHTML = html + `<span style="display:contents" aria-hidden="true">${html}</span>`;
+  requestAnimationFrame(() => { const w = track.scrollWidth / 2; track.style.animationDuration = Math.max(25, w / 55) + "s"; });
+}
+function refreshTickerTimes(){ document.querySelectorAll("#tickerTrack .tm[data-at]").forEach(e => { const t = ago(e.dataset.at); if (e.textContent !== t) e.textContent = t; }); }
+
+const popQ = []; let popBusy = false, popTimer = 0;
+function queuePops(fresh){ for (const s of fresh.slice(-2)) popQ.push(s); if (!popBusy) nextPop(); }
+function nextPop(){
+  const s = popQ.shift(), el = $("pop"); if (!s){ popBusy = false; return; }
+  if (S.tab === "manage"){ popQ.length = 0; popBusy = false; return; }
+  popBusy = true;
+  $("popT").innerHTML = `<b>${esc(s.name)}</b>${s.dept ? ` from ${esc(s.dept)}` : ""} just bought <b>${s.nums.length} ticket${s.nums.length > 1 ? "s" : ""}</b>`;
+  const N = S.pub.inDraw;
+  $("popS").innerHTML = N ? `Grand prize odds are now <span class="hot">1 in ${N.toLocaleString("en-IN")}</span>${cfg().price ? ` · ${esc(money(cfg().price))} a ticket` : ""}` : "Get yours before the draw";
+  el.classList.add("show");
+  clearTimeout(popTimer); popTimer = setTimeout(hidePop, 6500);
+}
+function hidePop(){ $("pop").classList.remove("show"); clearTimeout(popTimer); setTimeout(nextPop, 500); }
+$("popX").onclick = hidePop;
+
 /* ---------------- data ---------------- */
 function setLive(ok, txt){ $("liveDot").classList.toggle("off", !ok); $("liveTxt").textContent = txt; }
-function renderAll(){ renderBoard(); renderStageCtl(); renderStage(); renderManage(); tick(); }
+function renderAll(){ renderBoard(); renderTicker(); renderStageCtl(); renderStage(); renderManage(); tick(); }
 let loading = null, again = false;
 async function load(){
   if (loading){ again = true; return loading; }
   loading = (async () => {
     try {
-      const prevCount = S.pub.sales.length, had = S.pub !== EMPTY;
+      const prevIds = new Set(S.pub.sales.map(s => s.id)), had = S.pub !== EMPTY;
       const r = await fetch("/api/state", {cache:"no-store"}); if (!r.ok) throw 0;
       S.pub = await r.json();
       if (S.admin){ try { S.adm = (await api("/api/admin/state")); } catch {} }
       setLive(true, "Live");
-      if (had && S.pub.sales.length > prevCount && S.tab === "board") burst(innerWidth / 2, 160, 36);
+      const fresh = had ? S.pub.sales.filter(s => !prevIds.has(s.id)) : [];
       renderAll();
+      if (fresh.length && S.tab !== "manage"){ queuePops(fresh); if (S.tab === "board") burst(innerWidth / 2, 160, 36); }
     } catch { setLive(false, "Reconnecting…"); }
   })();
   await loading; loading = null;
@@ -564,7 +618,7 @@ async function boot(){
   const h = (location.hash || "").replace("#", ""); if (["draw","manage"].includes(h)) setTab(h);
   try { const me = await (await fetch("/api/me", {cache:"no-store"})).json(); S.admin = !!me.admin; S.me = me.name; } catch {}
   renderAuth(); await load(); connect();
-  setInterval(() => { if (S.tab === "board") renderBoard(); }, 30000);
+  setInterval(() => { if (S.tab === "board") renderBoard(); refreshTickerTimes(); }, 30000);
 }
 renderAll(); boot();
 })();
