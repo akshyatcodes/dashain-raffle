@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dashain Raffle</title>
+<meta name="description" content="Company Dashain raffle: prizes, live odds, ticket sales and the live draw.">
+<meta name="theme-color" content="#C4122F">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Mukta:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<style>html{color-scheme:light}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}@media (prefers-color-scheme:dark){html{color-scheme:dark}}</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="30" height="34" viewBox="0 0 30 34" aria-hidden="true"><path d="M15 1 L28 13 L15 25 L2 13 Z" fill="var(--tika)"/><path d="M15 1 L15 25 M2 13 L28 13" stroke="var(--marigold)" stroke-width="1.6"/><path d="M15 25 q-3 3 0 5 q3 2 0 4" stroke="var(--ink-3)" stroke-width="1.3" fill="none"/></svg>
+      <div><b id="brandTitle">Dashain Raffle</b><small id="brandSub">Company-wide · 2026</small></div>
+    </div>
+    <span class="live-dot off" id="liveDot"><i></i><span id="liveTxt">Connecting…</span></span>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tab-board" data-tab="board" aria-selected="true">Live board</button>
+      <button class="tab" role="tab" id="tab-draw" data-tab="draw" aria-selected="false">Draw stage</button>
+      <button class="tab" role="tab" id="tab-manage" data-tab="manage" aria-selected="false">Organisers</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="banner" class="banner" hidden></div>
+
+  <!-- ================= BOARD ================= -->
+  <div id="view-board">
+    <div class="hero">
+      <canvas id="kites" aria-hidden="true"></canvas>
+      <div class="hero-inner">
+        <div>
+          <div class="greet">शुभ विजया दशमी</div>
+          <h1 id="heroTitle">Dashain Raffle</h1>
+          <p class="lede" id="heroLede">Buy a ticket, fly a kite, win something. Every paid ticket gets an equal chance at every prize.</p>
+          <div class="countdown" id="countdown" aria-live="off">
+            <div class="cd"><b id="cdD">--</b><span>days</span></div>
+            <div class="cd"><b id="cdH">--</b><span>hrs</span></div>
+            <div class="cd"><b id="cdM">--</b><span>min</span></div>
+            <div class="cd"><b id="cdS">--</b><span>sec</span></div>
+          </div>
+          <div class="draw-when" id="drawWhen">Draw date to be announced</div>
+        </div>
+        <div class="stats">
+          <div class="stat hot"><span class="eyebrow">Tickets in the draw</span><b class="num" id="stTickets">0</b><span class="sub" id="stTicketsSub">paid &amp; confirmed</span></div>
+          <div class="stat"><span class="eyebrow">Prizes</span><b class="num" id="stPrizes">0</b><span class="sub" id="stPrizesSub">to be won</span></div>
+          <div class="stat"><span class="eyebrow">One ticket's chance</span><b class="num" id="stOdds">—</b><span class="sub">of winning something</span></div>
+          <div class="stat"><span class="eyebrow">Price</span><b class="num" id="stPrice">—</b><span class="sub">per ticket</span></div>
+          <div class="stat cap" id="capBox" hidden><div class="calc-row"><span class="eyebrow">Tickets left</span><span class="num mono" id="capTxt"></span></div><div class="bar"><i id="capBar" style="width:0"></i></div></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="block" aria-labelledby="h-prizes">
+      <div class="sec-head"><h2 id="h-prizes">The prizes</h2><p>Odds update live as tickets are sold.</p></div>
+      <div class="prizes" id="prizeGrid"></div>
+    </section>
+
+    <section class="block grid2">
+      <div class="panel">
+        <div class="sec-head"><h2>What are my odds?</h2></div>
+        <div class="calc-row"><span>If I hold</span><b id="calcK">1 ticket</b></div>
+        <input type="range" class="range" id="calcRange" min="1" max="20" value="1" aria-label="Number of tickets">
+        <div class="calc-out">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ground-2)" stroke-width="14"/>
+            <circle id="ringArc" cx="60" cy="60" r="50" fill="none" stroke="var(--tika)" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 314.16" transform="rotate(-90 60 60)"/>
+          </svg>
+          <div>
+            <div class="big num" id="calcPct">—</div>
+            <div style="color:var(--ink-2)">chance of winning <b>at least one</b> prize</div>
+            <div style="color:var(--ink-3);font-size:.88rem;margin-top:4px" id="calcGrand"></div>
+          </div>
+        </div>
+        <p class="fine">Tickets are drawn without replacement: once a ticket wins it leaves the draw. Only paid tickets are entered. Odds shift as more tickets sell.</p>
+      </div>
+      <div class="panel">
+        <div class="sec-head"><h2>Team leaderboard</h2><p>Tickets by team</p></div>
+        <div id="deptBoard"></div>
+      </div>
+    </section>
+
+    <section class="block grid2">
+      <div class="panel">
+        <div class="sec-head"><h2>Latest tickets</h2><p id="feedCount"></p></div>
+        <ul class="feed" id="feed"></ul>
+      </div>
+      <div class="panel">
+        <div class="sec-head"><h2>Find my tickets</h2></div>
+        <div class="lookup">
+          <input type="search" id="lookupQ" placeholder="Your name or a ticket number" aria-label="Your name or ticket number">
+        </div>
+        <div class="found" id="lookupOut"><div class="empty">Type your name as it was entered at purchase, or a ticket number like DSH-0012.</div></div>
+      </div>
+    </section>
+
+    <section class="block" id="winnersBlock" hidden>
+      <div class="sec-head"><h2>Winners</h2><p id="winnersSub"></p></div>
+      <div class="winners" id="winnersGrid"></div>
+    </section>
+  </div>
+
+  <!-- ================= DRAW ================= -->
+  <div id="view-draw" hidden>
+    <div class="stage" id="stage">
+      <canvas id="stageSky" aria-hidden="true"></canvas>
+      <div class="eyebrow" id="stEyebrow">Now drawing</div>
+      <div class="pz" id="stPrize">Waiting for the next draw</div>
+      <div class="reel" id="reel" aria-live="polite">DSH-????</div>
+      <div class="who" id="stWho"></div>
+      <div class="note" id="stNote">Keep this screen open. It updates the moment management draws a winner.</div>
+      <div class="stage-tally"><span>In the draw <b id="tIn">0</b></span><span>Prizes left <b id="tLeft">0</b></span><span>Drawn <b id="tDrawn">0</b></span></div>
+      <div class="stage-ctl" id="stageCtl" hidden>
+        <select id="drawPrize" aria-label="Prize to draw"></select>
+        <button class="btn primary" id="drawBtn">Draw a winner</button>
+        <button class="btn sm" id="stageReset" title="Clear the stage if a draw got stuck">Reset stage</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MANAGE ================= -->
+  <div id="view-manage" hidden>
+    <form class="panel form login" id="loginForm" autocomplete="on">
+      <h2>Organiser sign-in</h2>
+      <p>For the raffle team only. Everyone else can follow along on the live board.</p>
+      <label class="f">Your name (shown in the audit log)<input type="text" id="lName" autocomplete="name" maxlength="40" required></label>
+      <label class="f">Raffle password<input type="password" id="lPass" autocomplete="current-password" required></label>
+      <div class="err" id="lErr" role="alert"></div>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <section class="block" id="console" hidden>
+      <div class="who-bar"><span id="whoName"></span><button class="btn sm ghost" id="logoutBtn">Sign out</button></div>
+      <div class="kpis">
+        <div class="kpi"><span class="eyebrow">Tickets sold</span><b class="num" id="kSold">0</b></div>
+        <div class="kpi"><span class="eyebrow">Collected</span><b class="num" id="kPaid">0</b></div>
+        <div class="kpi" id="kOweBox"><span class="eyebrow">Outstanding</span><b class="num" id="kOwe">0</b></div>
+        <div class="kpi"><span class="eyebrow">Buyers</span><b class="num" id="kBuyers">0</b></div>
+      </div>
+      <div class="subtabs" role="tablist" aria-label="Management">
+        <button class="subtab" data-sub="sell" aria-selected="true">Sell tickets</button>
+        <button class="subtab" data-sub="paper" aria-selected="false">Paper tickets</button>
+        <button class="subtab" data-sub="ledger" aria-selected="false">Sales ledger</button>
+        <button class="subtab" data-sub="prizes" aria-selected="false">Prizes</button>
+        <button class="subtab" data-sub="settings" aria-selected="false">Settings</button>
+        <button class="subtab" data-sub="results" aria-selected="false">Draw results</button>
+      </div>
+
+      <div id="sub-sell" class="grid2">
+        <form class="panel form" id="sellForm" autocomplete="off">
+          <h2>Issue tickets</h2>
+          <div class="frow">
+            <label class="f">Buyer name<input type="text" id="sBuyer" required maxlength="80" placeholder="e.g. Sita Karki"></label>
+            <label class="f">Team<input type="text" id="sDept" list="deptList" maxlength="40" placeholder="e.g. Finance"></label>
+          </div>
+          <datalist id="deptList"></datalist>
+          <div class="frow">
+            <label class="f">How many tickets
+              <div class="stepper"><button type="button" id="sMinus" aria-label="One fewer">−</button><input type="number" id="sCount" min="1" max="100" value="1" aria-label="Ticket count"><button type="button" id="sPlus" aria-label="One more">+</button></div>
+            </label>
+            <label class="f">Payment method
+              <select id="sMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" id="sPaid" checked> Payment received (only paid tickets enter the draw)</label>
+          <label class="check"><input type="checkbox" id="sAnon"> Keep buyer's name off the public board</label>
+          <div class="total"><span>Total due</span><b class="num" id="sTotal">—</b></div>
+          <button class="btn primary" type="submit" id="sSubmit">Generate tickets</button>
+        </form>
+        <div class="issued" id="issued">
+          <div class="eyebrow">Ticket preview</div>
+          <div id="ticketPreview"></div>
+          <div class="acts" id="issuedActs" hidden>
+            <button class="btn dark" id="copyMsg">Copy message for buyer</button>
+            <button class="btn" id="printIssued">Print tickets</button>
+            <button class="btn" id="saveImg">Save ticket image</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="sub-paper" class="grid2" hidden>
+        <div class="panel">
+          <div class="sec-head"><h2>Ticket books</h2></div>
+          <form class="form" id="bookForm" autocomplete="off">
+            <p class="hint">Reserve a block of numbered tickets and print them, 5 to an A4 page with a stub for the seller to keep. Unsold paper tickets never enter the draw.</p>
+            <div class="frow">
+              <label class="f">How many tickets<input type="number" id="bCount" min="1" max="1000" value="50"></label>
+              <label class="f">Book name<input type="text" id="bLabel" maxlength="40" placeholder="e.g. Book A"></label>
+            </div>
+            <label class="f">Who is selling this book<input type="text" id="bHolder" maxlength="60" placeholder="e.g. Ram, front desk"></label>
+            <div><button class="btn primary" type="submit">Create &amp; print book</button></div>
+          </form>
+          <div class="books" id="bookList" style="margin-top:16px"></div>
+        </div>
+        <form class="panel form" id="paperForm" autocomplete="off">
+          <h2>Record paper tickets sold</h2>
+          <p class="hint">Copy the details from the stubs. Numbers can be single tickets or ranges, like <span class="mono">12-15, 18</span>.</p>
+          <label class="f">Ticket numbers<input type="text" id="pNums" required placeholder="12-15, 18"></label>
+          <div class="frow">
+            <label class="f">Buyer name<input type="text" id="pBuyer" required maxlength="80"></label>
+            <label class="f">Team<input type="text" id="pDept" list="deptList" maxlength="40"></label>
+          </div>
+          <label class="f">Payment method
+            <select id="pMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
+          </label>
+          <label class="check"><input type="checkbox" id="pPaid" checked> Payment received</label>
+          <label class="check"><input type="checkbox" id="pAnon"> Keep buyer's name off the public board</label>
+          <div class="total"><span id="pSummary">Total due</span><b class="num" id="pTotal">—</b></div>
+          <button class="btn primary" type="submit">Record sale</button>
+        </form>
+      </div>
+
+      <div id="sub-ledger" hidden>
+        <div class="toolbar">
+          <input type="search" id="lgQ" placeholder="Search buyer, team or ticket" aria-label="Search sales">
+          <select id="lgF" aria-label="Filter" style="width:auto"><option value="all">All sales</option><option value="unpaid">Unpaid only</option><option value="paid">Paid only</option><option value="void">Voided</option></select>
+          <span style="margin-left:auto"></span>
+          <button class="btn sm" id="csvBtn">Export CSV</button>
+        </div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Tickets</th><th>Buyer</th><th>Team</th><th>Qty</th><th>Amount</th><th>Method</th><th>Type</th><th>Status</th><th>Sold</th><th></th></tr></thead>
+          <tbody id="lgBody"></tbody>
+        </table></div>
+      </div>
+
+      <div id="sub-prizes" class="panel" hidden>
+        <div class="sec-head"><h2>Prizes</h2><p>Order 1 is the grand prize. Quantity above 1 means that many separate winners.</p></div>
+        <div id="prizeEditor"></div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="addPrize">Add a prize</button>
+        </div>
+      </div>
+
+      <form id="sub-settings" class="panel form" hidden>
+        <h2>Event settings</h2>
+        <div class="frow">
+          <label class="f">Event name<input type="text" id="cTitle" maxlength="60"></label>
+          <label class="f">Tagline<input type="text" id="cLede" maxlength="160"></label>
+        </div>
+        <div class="frow">
+          <label class="f">Ticket price<input type="number" id="cPrice" min="0" step="1"></label>
+          <label class="f">Currency label<input type="text" id="cCur" maxlength="6"></label>
+        </div>
+        <div class="frow">
+          <label class="f">Draw date &amp; time (Nepal time)<input type="datetime-local" id="cDraw"></label>
+          <label class="f">Ticket prefix<input type="text" id="cPrefix" maxlength="5"></label>
+        </div>
+        <div class="frow">
+          <label class="f">Ticket limit (0 = no limit)<input type="number" id="cCap" min="0" step="1"></label>
+          <label class="f">Max per person (0 = no limit)<input type="number" id="cPer" min="0" step="1"></label>
+        </div>
+        <label class="f">Web address printed on tickets<input type="text" id="cUrl" maxlength="80"></label>
+        <div><button class="btn primary" type="submit">Save settings</button></div>
+      </form>
+
+      <div id="sub-results" class="panel" hidden>
+        <div class="sec-head"><h2>Draw results</h2><p>Remove a result to redraw that prize, for example if the winner can't be reached.</p></div>
+        <div class="tablewrap"><table>
+          <thead><tr><th>#</th><th>Prize</th><th>Ticket</th><th>Winner</th><th>Team</th><th>Drawn</th><th></th></tr></thead>
+          <tbody id="resBody"></tbody>
+        </table></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<canvas class="fx" id="fx" aria-hidden="true"></canvas>
+<div class="toast" id="toast" role="status"></div>
+<div id="printRoot" aria-hidden="true"></div>
+<script src="/app.js"></script>
+</body>
+</html>
