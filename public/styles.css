@@ -318,3 +318,48 @@ td.acts{display:flex;gap:6px}
 .pop-s{font-size:.82rem;color:var(--ink-2);margin-top:2px}
 .pop-s .hot{color:var(--tika);font-weight:600}
 .pop-x{flex:none;border:0;background:transparent;color:var(--ink-3);font-size:1.3rem;line-height:1;cursor:pointer;padding:0 4px}
+
+/* ---- pricing ---- */
+.tiers{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.tier{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:1px;position:relative;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.tier:hover{border-color:var(--ink-3)}
+.tier .q{font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.tier .p{font-family:var(--mono);font-size:1.3rem;font-weight:600;line-height:1.2}
+.tier .e{font-size:.78rem;color:var(--ink-2)}
+.tier.best{border-color:var(--tika);background:linear-gradient(135deg,var(--tika-soft),var(--paper) 70%)}
+.tier.best::after{content:"Best value";position:absolute;top:-9px;right:10px;background:var(--tika);color:#fff;font-size:.66rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:1px 8px;border-radius:99px}
+.calc-tiers{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.calc-tiers button{border:1px solid var(--line);background:var(--paper-2);border-radius:99px;padding:3px 12px;font-size:.84rem;font-weight:600;color:var(--ink-2);cursor:pointer}
+.calc-tiers button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.brk{display:block;font-size:.8rem;color:var(--ink-3);font-weight:500}
+.upsell{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:var(--jamara-soft);color:var(--ink);font-size:.9rem}
+.upsell b{color:var(--jamara)}
+fieldset.bundles{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0;display:flex;flex-direction:column;gap:10px}
+fieldset.bundles legend{font-size:.85rem;font-weight:600;color:var(--ink-2);padding:0 6px}
+.brow{display:grid;grid-template-columns:110px 160px 1fr auto;gap:10px;align-items:end}
+.brow .each{font-size:.82rem;color:var(--ink-3);padding-bottom:10px;white-space:nowrap}
+@media (max-width:520px){.brow{grid-template-columns:1fr 1fr}.brow .each{grid-column:1}}
+
+/* ---- roles ---- */
+body:not(.is-finance) .fin{display:none!important}
+body.is-finance .org-only{display:none!important}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.role-chip{display:inline-flex;align-items:center;padding:1px 10px;border-radius:99px;font-size:.76rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--paper-2);border:1px solid var(--line);color:var(--ink-2)}
+.role-chip.finance{background:var(--jamara-soft);color:var(--jamara);border-color:transparent}
+
+/* ---- draw page prize board ---- */
+.list-toggle{border:1px solid #33436F;background:#141E3C;color:#F2F5FC;border-radius:99px;padding:3px 14px;font-weight:600;font-size:.85rem;cursor:pointer}
+.list-toggle[aria-expanded="true"]{background:#FFB930;color:#0B1226;border-color:#FFB930}
+.pb-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.pb{display:grid;grid-template-columns:44px minmax(0,1.2fr) minmax(0,2fr);gap:14px;align-items:center;background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:12px 16px}
+.pb .rk{font-family:var(--mono);font-size:1.2rem;font-weight:600;color:var(--ink-3);text-align:center}
+.pb .nm{font-family:var(--display);font-size:1.2rem;line-height:1.15}
+.pb .nm small{display:block;font-family:var(--body);font-size:.8rem;color:var(--ink-3);margin-top:2px}
+.pb .ws{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.pb .w{display:inline-flex;gap:8px;align-items:baseline;background:var(--jamara-soft);border-radius:10px;padding:4px 10px;font-size:.9rem}
+.pb .w .t{font-family:var(--mono);font-weight:600;color:var(--tika)}
+.pb .w.slot{background:transparent;border:1px dashed var(--line);color:var(--ink-3)}
+.pb.grand{border-color:color-mix(in srgb,var(--marigold) 55%,var(--line));background:linear-gradient(135deg,var(--marigold-soft),var(--paper) 55%)}
+.pb.done{opacity:.92}
+.pb.now{outline:2px solid var(--tika);outline-offset:2px}
+@media (max-width:640px){.pb{grid-template-columns:36px 1fr}.pb .ws{grid-column:1/-1;justify-content:flex-start}}

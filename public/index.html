@@ -57,7 +57,8 @@
           <div class="stat hot"><span class="eyebrow">Tickets in the draw</span><b class="num" id="stTickets">0</b><span class="sub" id="stTicketsSub">paid &amp; confirmed</span></div>
           <div class="stat"><span class="eyebrow">Prizes</span><b class="num" id="stPrizes">0</b><span class="sub" id="stPrizesSub">to be won</span></div>
           <div class="stat"><span class="eyebrow">One ticket's chance</span><b class="num" id="stOdds">—</b><span class="sub">of winning something</span></div>
-          <div class="stat"><span class="eyebrow">Price</span><b class="num" id="stPrice">—</b><span class="sub">per ticket</span></div>
+          <div class="stat"><span class="eyebrow">Best deal</span><b class="num" id="stPrice">—</b><span class="sub" id="stPriceSub">per ticket</span></div>
+          <div class="tiers" id="tiers" aria-label="Ticket prices"></div>
           <div class="stat cap" id="capBox" hidden><div class="calc-row"><span class="eyebrow">Tickets left</span><span class="num mono" id="capTxt"></span></div><div class="bar"><i id="capBar" style="width:0"></i></div></div>
         </div>
       </div>
@@ -72,7 +73,8 @@
       <div class="panel">
         <div class="sec-head"><h2>What are my odds?</h2></div>
         <div class="calc-row"><span>If I hold</span><b id="calcK">1 ticket</b></div>
-        <input type="range" class="range" id="calcRange" min="1" max="20" value="1" aria-label="Number of tickets">
+        <input type="range" class="range" id="calcRange" min="1" max="21" value="1" aria-label="Number of tickets">
+        <div class="calc-tiers" id="calcTiers"></div>
         <div class="calc-out">
           <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
             <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ground-2)" stroke-width="14"/>
@@ -121,13 +123,17 @@
       <div class="reel" id="reel" aria-live="polite">DSH-????</div>
       <div class="who" id="stWho"></div>
       <div class="note" id="stNote">Keep this screen open. It updates the moment management draws a winner.</div>
-      <div class="stage-tally"><span>In the draw <b id="tIn">0</b></span><span>Prizes left <b id="tLeft">0</b></span><span>Drawn <b id="tDrawn">0</b></span></div>
+      <div class="stage-tally"><span>In the draw <b id="tIn">0</b></span><span>Prizes left <b id="tLeft">0</b></span><span>Drawn <b id="tDrawn">0</b></span><button type="button" class="list-toggle" id="listToggle" aria-expanded="false" aria-controls="prizeBoard">Show prizes &amp; winners</button></div>
       <div class="stage-ctl" id="stageCtl" hidden>
         <select id="drawPrize" aria-label="Prize to draw"></select>
         <button class="btn primary" id="drawBtn">Draw a winner</button>
         <button class="btn sm" id="stageReset" title="Clear the stage if a draw got stuck">Reset stage</button>
       </div>
     </div>
+    <section class="block prize-board" id="prizeBoard" hidden aria-labelledby="h-pb">
+      <div class="sec-head"><h2 id="h-pb">Prizes &amp; winners</h2><p id="pbSub"></p></div>
+      <ol class="pb-list" id="pbList"></ol>
+    </section>
   </div>
 
   <!-- ================= MANAGE ================= -->
@@ -136,7 +142,7 @@
       <h2>Organiser sign-in</h2>
       <p>For the raffle team only. Everyone else can follow along on the live board.</p>
       <label class="f">Your name (shown in the audit log)<input type="text" id="lName" autocomplete="name" maxlength="40" required></label>
-      <label class="f">Raffle password<input type="password" id="lPass" autocomplete="current-password" required></label>
+      <label class="f">Password (organiser or finance)<input type="password" id="lPass" autocomplete="current-password" required></label>
       <div class="err" id="lErr" role="alert"></div>
       <button class="btn primary" type="submit">Sign in</button>
     </form>
@@ -144,8 +150,8 @@
       <div class="who-bar"><span id="whoName"></span><button class="btn sm ghost" id="logoutBtn">Sign out</button></div>
       <div class="kpis">
         <div class="kpi"><span class="eyebrow">Tickets sold</span><b class="num" id="kSold">0</b></div>
-        <div class="kpi"><span class="eyebrow">Collected</span><b class="num" id="kPaid">0</b></div>
-        <div class="kpi" id="kOweBox"><span class="eyebrow">Outstanding</span><b class="num" id="kOwe">0</b></div>
+        <div class="kpi fin" id="kPaidBox"><span class="eyebrow">Collected</span><b class="num" id="kPaid">0</b></div>
+        <div class="kpi fin" id="kOweBox"><span class="eyebrow">Outstanding</span><b class="num" id="kOwe">0</b></div>
         <div class="kpi"><span class="eyebrow">Buyers</span><b class="num" id="kBuyers">0</b></div>
       </div>
       <div class="subtabs" role="tablist" aria-label="Management">
@@ -173,9 +179,11 @@
               <select id="sMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
             </label>
           </div>
-          <label class="check"><input type="checkbox" id="sPaid" checked> Payment received (only paid tickets enter the draw)</label>
+          <label class="check fin"><input type="checkbox" id="sPaid" checked> Payment received (only paid tickets enter the draw)</label>
+          <p class="hint org-only">Finance confirms the payment. Tickets enter the draw once they're marked paid.</p>
           <label class="check"><input type="checkbox" id="sAnon"> Keep buyer's name off the public board</label>
-          <div class="total"><span>Total due</span><b class="num" id="sTotal">—</b></div>
+          <div class="total"><span>Total due <small class="brk" id="sBreak"></small></span><b class="num" id="sTotal">—</b></div>
+          <div class="upsell" id="sHint" hidden></div>
           <button class="btn primary" type="submit" id="sSubmit">Generate tickets</button>
         </form>
         <div class="issued" id="issued">
@@ -214,9 +222,10 @@
           <label class="f">Payment method
             <select id="pMethod"><option>Cash</option><option>eSewa</option><option>Khalti</option><option>Bank transfer</option><option>Salary deduction</option><option>Other</option></select>
           </label>
-          <label class="check"><input type="checkbox" id="pPaid" checked> Payment received</label>
+          <label class="check fin"><input type="checkbox" id="pPaid" checked> Payment received</label>
+          <p class="hint org-only">Hand the cash to finance. They'll mark these tickets paid.</p>
           <label class="check"><input type="checkbox" id="pAnon"> Keep buyer's name off the public board</label>
-          <div class="total"><span id="pSummary">Total due</span><b class="num" id="pTotal">—</b></div>
+          <div class="total"><span><span id="pSummary">Total due</span> <small class="brk" id="pBreak"></small></span><b class="num" id="pTotal">—</b></div>
           <button class="btn primary" type="submit">Record sale</button>
         </form>
       </div>
@@ -226,7 +235,7 @@
           <input type="search" id="lgQ" placeholder="Search buyer, team or ticket" aria-label="Search sales">
           <select id="lgF" aria-label="Filter" style="width:auto"><option value="all">All sales</option><option value="unpaid">Unpaid only</option><option value="paid">Paid only</option><option value="void">Voided</option></select>
           <span style="margin-left:auto"></span>
-          <button class="btn sm" id="csvBtn">Export CSV</button>
+          <button class="btn sm fin" id="csvBtn">Export CSV</button>
         </div>
         <div class="tablewrap"><table>
           <thead><tr><th>Tickets</th><th>Buyer</th><th>Team</th><th>Qty</th><th>Amount</th><th>Method</th><th>Type</th><th>Status</th><th>Sold</th><th></th></tr></thead>
@@ -249,9 +258,15 @@
           <label class="f">Tagline<input type="text" id="cLede" maxlength="160"></label>
         </div>
         <div class="frow">
-          <label class="f">Ticket price<input type="number" id="cPrice" min="0" step="1"></label>
           <label class="f">Currency label<input type="text" id="cCur" maxlength="6"></label>
+          <span></span>
         </div>
+        <fieldset class="bundles">
+          <legend>Ticket prices</legend>
+          <p class="hint">A single-ticket price is required. Add bundles like "3 for 500". Every sale is charged the cheapest combination.</p>
+          <div id="bundleRows"></div>
+          <div><button type="button" class="btn sm" id="addBundle">Add a bundle</button></div>
+        </fieldset>
         <div class="frow">
           <label class="f">Draw date &amp; time (Nepal time)<input type="datetime-local" id="cDraw"></label>
           <label class="f">Ticket prefix<input type="text" id="cPrefix" maxlength="5"></label>

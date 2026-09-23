@@ -9,13 +9,14 @@ const crypto = require("crypto");
 const PORT = +process.env.PORT || 8080;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
-const ADMIN_PASSWORD = process.env.RAFFLE_ADMIN_PASSWORD || "";
+const ADMIN_PASSWORD = process.env.RAFFLE_ADMIN_PASSWORD || "";   // organisers: sell, books, prizes, draw
+const FINANCE_PASSWORD = process.env.RAFFLE_FINANCE_PASSWORD || ""; // finance: everything organisers do + payments, pricing, collections
 const SESSION_SECRET = process.env.RAFFLE_SESSION_SECRET || "";
 const ROLL_MS = +process.env.RAFFLE_ROLL_MS || 4000;
 const SESSION_HOURS = 12;
 
-if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12 || !SESSION_SECRET || SESSION_SECRET.length < 32) {
-  console.error("RAFFLE_ADMIN_PASSWORD (>=12 chars) and RAFFLE_SESSION_SECRET (>=32 chars) must be set");
+if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12 || !FINANCE_PASSWORD || FINANCE_PASSWORD.length < 12 || FINANCE_PASSWORD === ADMIN_PASSWORD || !SESSION_SECRET || SESSION_SECRET.length < 32) {
+  console.error("RAFFLE_ADMIN_PASSWORD and RAFFLE_FINANCE_PASSWORD (>=12 chars, different) and RAFFLE_SESSION_SECRET (>=32 chars) must be set");
   process.exit(1);
 }
 
@@ -27,7 +28,7 @@ fs.mkdirSync(SNAP_DIR, { recursive: true });
 const DEFAULT = () => ({
   version: 0,
   config: { title: "Dashain Raffle", lede: "Buy a ticket, fly a kite, win something. Every paid ticket gets an equal chance at every prize.",
-    price: 500, currency: "Rs", drawAt: null, prefix: "DSH", cap: 0, perPerson: 0, publicUrl: "raffle.akshyatsharma.com.np" },
+    price: 200, bundles: [{ qty: 1, price: 200 }, { qty: 3, price: 500 }, { qty: 7, price: 1000 }], currency: "Rs", drawAt: null, prefix: "DSH", cap: 0, perPerson: 0, publicUrl: "raffle.akshyatsharma.com.np" },
   counter: 1, prizes: [], sales: [], batches: [], draws: [], stage: { state: "idle", at: null }, audit: [],
 });
 
@@ -35,6 +36,9 @@ let db;
 try { db = { ...DEFAULT(), ...JSON.parse(fs.readFileSync(DB_FILE, "utf8")) }; }
 catch (e) { if (e.code !== "ENOENT") { console.error("cannot read", DB_FILE, e.message); process.exit(1); } db = DEFAULT(); }
 
+// pricing: bundles[] is the price list; `price` mirrors the 1-ticket tier. Older sales keep what they were charged.
+if (!Array.isArray(db.config.bundles) || !db.config.bundles.length) db.config.bundles = [{ qty: 1, price: +db.config.price || 0 }];
+for (const s of db.sales) if (s.amount == null) s.amount = s.nums.length * (s.price ?? db.config.price ?? 0);
 if (db.stage.state === "rolling") db.stage = { state: "idle", at: new Date().toISOString() }; // a restart mid-roll never picked a winner
 if (!db.version && !db.prizes.length) db.prizes = [ // sample prizes on a fresh install, flagged until edited
   ["55-inch 4K smart TV", 1, 85000], ["Weekend for two in Pokhara", 1, 40000], ["Smartwatch", 1, 25000],
@@ -76,6 +80,21 @@ function publicName(s) {
   const parts = String(s.buyer).trim().split(/\s+/);
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
 }
+// Cheapest exact combination of bundles for n tickets (unbounded knapsack). Returns {amount, parts:[{qty,price,times}]} or null.
+function priceFor(n, bundles = db.config.bundles) {
+  const best = [{ amount: 0, pick: null }];
+  for (let i = 1; i <= n; i++) {
+    best[i] = null;
+    for (const b of bundles) if (b.qty <= i && best[i - b.qty]) {
+      const a = best[i - b.qty].amount + b.price;
+      if (!best[i] || a < best[i].amount) best[i] = { amount: a, pick: b };
+    }
+  }
+  if (!best[n]) return null;
+  const counts = new Map(); for (let i = n; i > 0; i -= best[i].pick.qty) counts.set(best[i].pick, (counts.get(best[i].pick) || 0) + 1);
+  return { amount: best[n].amount, parts: [...counts].sort((x, y) => y[0].qty - x[0].qty).map(([b, times]) => ({ qty: b.qty, price: b.price, times })) };
+}
+function charge(n) { const p = priceFor(n); if (!p) throw bad("That number of tickets can't be made from the bundles on sale"); return p; }
 function allocate(count) { const from = db.counter; db.counter += count; return Array.from({ length: count }, (_, i) => from + i); }
 function parseNums(spec) {
   const out = new Set();
@@ -114,22 +133,21 @@ function adminState() { return { ...db, stage: stagePublic(), inDraw: eligible()
 
 /* ---------------- sessions ---------------- */
 const sign = v => crypto.createHmac("sha256", SESSION_SECRET).update(v).digest("base64url");
-function makeSession(name) {
-  const payload = Buffer.from(JSON.stringify({ n: name, e: Date.now() + SESSION_HOURS * 3600e3 })).toString("base64url");
+function makeSession(name, role) {
+  const payload = Buffer.from(JSON.stringify({ n: name, r: role, e: Date.now() + SESSION_HOURS * 3600e3 })).toString("base64url");
   return payload + "." + sign(payload);
 }
 function readSession(req) {
   const m = (req.headers.cookie || "").match(/(?:^|;\s*)rs=([^;]+)/); if (!m) return null;
   const [p, sig] = m[1].split("."); if (!p || !sig) return null;
   const good = sign(p); if (good.length !== sig.length || !crypto.timingSafeEqual(Buffer.from(good), Buffer.from(sig))) return null;
-  try { const o = JSON.parse(Buffer.from(p, "base64url").toString()); return o.e > Date.now() ? { name: o.n } : null; } catch { return null; }
+  try { const o = JSON.parse(Buffer.from(p, "base64url").toString()); return o.e > Date.now() ? { name: o.n, role: o.r === "finance" ? "finance" : "organiser", finance: o.r === "finance" } : null; } catch { return null; }
 }
 const attempts = new Map();
 function clientIp(req) { return req.headers["cf-connecting-ip"] || String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress; }
-function passwordOk(pw) {
-  const a = crypto.createHash("sha256").update(String(pw)).digest(), b = crypto.createHash("sha256").update(ADMIN_PASSWORD).digest();
-  return crypto.timingSafeEqual(a, b);
-}
+const hashEq = (x, y) => crypto.timingSafeEqual(crypto.createHash("sha256").update(String(x)).digest(), crypto.createHash("sha256").update(String(y)).digest());
+function roleFor(pw) { const f = hashEq(pw, FINANCE_PASSWORD), o = hashEq(pw, ADMIN_PASSWORD); return f ? "finance" : o ? "organiser" : null; }
+const financeOnly = (who, what) => { if (!who.finance) throw bad(`Only finance can ${what}`, 403); };
 
 /* ---------------- SSE ---------------- */
 const clients = new Set();
@@ -180,10 +198,11 @@ function serveStatic(req, res) {
 const actions = {
   sale(b, who) {
     const buyer = str(b.buyer, 80); if (!buyer) throw bad("Enter the buyer's name");
-    const count = int(b.count, 1, 100); checkLimits(buyer, count);
-    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums: allocate(count), price: +db.config.price || 0, method: str(b.method, 30),
-      paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who, source: "digital" };
-    db.sales.push(sale); audit(who, `sold ${count} to ${buyer}`); return { sale };
+    const count = int(b.count, 1, 100); checkLimits(buyer, count); const pr = charge(count);
+    if (!who.finance) b.paid = false; // organisers record sales; finance confirms the money
+    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums: allocate(count), amount: pr.amount, pricing: pr.parts, method: str(b.method, 30),
+      paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who.name, source: "digital" };
+    db.sales.push(sale); audit(who.name, `sold ${count} to ${buyer}`); return { sale };
   },
   bookSale(b, who) {
     const buyer = str(b.buyer, 80); if (!buyer) throw bad("Enter the buyer's name");
@@ -192,17 +211,20 @@ const actions = {
       if (!batchFor(n)) throw bad(`Ticket ${n} isn't in any printed ticket book`);
       if (taken.has(n)) throw bad(`Ticket ${n} has already been sold`);
     }
-    checkLimits(buyer, nums.length);
-    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums, price: +db.config.price || 0, method: str(b.method, 30),
-      paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who, source: "book", batchId: batchFor(nums[0]).id };
-    db.sales.push(sale); audit(who, `recorded paper tickets ${nums.join(",")} for ${buyer}`); return { sale };
+    checkLimits(buyer, nums.length); const pr = charge(nums.length);
+    if (!who.finance) b.paid = false;
+    const sale = { id: uid("s"), buyer, dept: str(b.dept, 40), nums, amount: pr.amount, pricing: pr.parts, method: str(b.method, 30),
+      paid: !!b.paid, anon: !!b.anon, void: false, at: new Date().toISOString(), soldBy: who.name, source: "book", batchId: batchFor(nums[0]).id };
+    db.sales.push(sale); audit(who.name, `recorded paper tickets ${nums.join(",")} for ${buyer}`); return { sale };
   },
   saleUpdate(b, who) {
     const s = db.sales.find(x => x.id === b.id); if (!s) throw bad("Sale not found", 404);
-    if ("paid" in b) { s.paid = !!b.paid; s.paidAt = s.paid ? new Date().toISOString() : null; audit(who, `${s.paid ? "paid" : "unpaid"} ${s.id}`); }
+    if ("paid" in b) financeOnly(who, "change payment status");
+    if (b.void && s.paid) financeOnly(who, "void a paid sale");
+    if ("paid" in b) { s.paid = !!b.paid; s.paidAt = s.paid ? new Date().toISOString() : null; audit(who.name, `${s.paid ? "paid" : "unpaid"} ${s.id}`); }
     if (b.void) {
       if (db.draws.some(d => s.nums.includes(d.ticket))) throw bad("One of these tickets has already won. Remove that result first.");
-      s.void = true; s.voidAt = new Date().toISOString(); audit(who, `voided ${s.id}`);
+      s.void = true; s.voidAt = new Date().toISOString(); audit(who.name, `voided ${s.id}`);
     }
     return { sale: s };
   },
@@ -210,13 +232,13 @@ const actions = {
     const count = int(b.count, 1, 1000);
     const c = db.config; if (c.cap > 0 && db.counter - 1 + count > c.cap) throw bad(`That would number past the ${c.cap}-ticket limit`);
     const nums = allocate(count);
-    const batch = { id: uid("b"), label: str(b.label, 40) || `Book ${db.batches.length + 1}`, holder: str(b.holder, 60), from: nums[0], to: nums[nums.length - 1], at: new Date().toISOString(), by: who };
-    db.batches.push(batch); audit(who, `printed book ${batch.label} ${batch.from}-${batch.to}`); return { batch };
+    const batch = { id: uid("b"), label: str(b.label, 40) || `Book ${db.batches.length + 1}`, holder: str(b.holder, 60), from: nums[0], to: nums[nums.length - 1], at: new Date().toISOString(), by: who.name };
+    db.batches.push(batch); audit(who.name, `printed book ${batch.label} ${batch.from}-${batch.to}`); return { batch };
   },
   batchDelete(b, who) {
     const bt = db.batches.find(x => x.id === b.id); if (!bt) throw bad("Book not found", 404);
     if (liveSales().some(s => s.nums.some(n => n >= bt.from && n <= bt.to))) throw bad("Tickets from this book are already sold. Void those sales first.");
-    db.batches = db.batches.filter(x => x !== bt); audit(who, `deleted book ${bt.label}`); return {};
+    db.batches = db.batches.filter(x => x !== bt); audit(who.name, `deleted book ${bt.label}`); return {};
   },
   prizeUpsert(b, who) {
     const d = { name: str(b.name, 80), qty: int(b.qty, 1, 100), value: b.value === null || b.value === "" ? null : int(b.value, 0, 1e9), sponsor: str(b.sponsor, 40), order: int(b.order, 1, 999) };
@@ -224,20 +246,25 @@ const actions = {
     let p = db.prizes.find(x => x.id === b.id);
     if (p) { const drawn = db.draws.filter(x => x.prizeId === p.id).length; if (d.qty < drawn) throw bad(`${drawn} already drawn; quantity can't go lower`); Object.assign(p, d, { sample: false }); }
     else { p = { id: uid("p"), ...d, sample: false }; db.prizes.push(p); }
-    audit(who, `saved prize ${p.name}`); return { prize: p };
+    audit(who.name, `saved prize ${p.name}`); return { prize: p };
   },
   prizeDelete(b, who) {
     if (db.draws.some(d => d.prizeId === b.id)) throw bad("This prize has been drawn. Remove its results first.");
-    db.prizes = db.prizes.filter(p => p.id !== b.id); audit(who, `deleted prize ${b.id}`); return {};
+    db.prizes = db.prizes.filter(p => p.id !== b.id); audit(who.name, `deleted prize ${b.id}`); return {};
   },
   config(b, who) {
     const c = db.config;
+    if (b.bundles !== undefined && JSON.stringify(b.bundles) !== JSON.stringify(c.bundles)) financeOnly(who, "change ticket prices");
+    const seen = new Set(), bundles = (Array.isArray(b.bundles) ? b.bundles : []).slice(0, 8)
+      .map(x => ({ qty: int(x.qty, 1, 100), price: int(x.price, 0, 1e7) })).filter(x => !seen.has(x.qty) && seen.add(x.qty)).sort((x, y) => x.qty - y.qty);
+    if (b.bundles === undefined) bundles.push(...c.bundles);
+    if (!bundles.length || bundles[0].qty !== 1) throw bad("Set a price for a single ticket so any number of tickets can be sold");
     Object.assign(c, {
-      title: str(b.title, 60) || "Dashain Raffle", lede: str(b.lede, 160), price: int(b.price, 0, 1e7), currency: str(b.currency, 6),
+      title: str(b.title, 60) || "Dashain Raffle", lede: str(b.lede, 160), bundles, price: bundles[0].price, currency: str(b.currency, 6),
       prefix: (str(b.prefix, 5).toUpperCase().replace(/[^A-Z0-9]/g, "") || "T"), cap: int(b.cap, 0, 100000), perPerson: int(b.perPerson, 0, 10000),
       drawAt: b.drawAt && !isNaN(Date.parse(b.drawAt)) ? new Date(b.drawAt).toISOString() : null, publicUrl: str(b.publicUrl, 80) || c.publicUrl,
     });
-    audit(who, "updated settings"); return { config: c };
+    audit(who.name, "updated settings"); return { config: c };
   },
   draw(b, who) {
     if (db.stage.state === "rolling") throw bad("A draw is already in progress", 409);
@@ -249,17 +276,17 @@ const actions = {
       const pool = eligible();
       if (!pool.length) { db.stage = { state: "idle", at: new Date().toISOString() }; return save(); }
       const pick = pool[crypto.randomInt(pool.length)];
-      const d = { id: uid("d"), prizeId: prize.id, prizeName: prize.name, ticket: pick.n, saleId: pick.s.id, at: new Date().toISOString(), by: who, poolSize: pool.length };
+      const d = { id: uid("d"), prizeId: prize.id, prizeName: prize.name, ticket: pick.n, saleId: pick.s.id, at: new Date().toISOString(), by: who.name, poolSize: pool.length };
       db.draws.push(d);
       db.stage = { state: "revealed", prizeId: prize.id, prizeName: prize.name, ticket: pick.n, drawId: d.id, at: d.at };
-      audit(who, `drew ${pick.n} for ${prize.name} from ${pool.length} tickets`); save();
+      audit(who.name, `drew ${pick.n} for ${prize.name} from ${pool.length} tickets`); save();
     }, ROLL_MS);
-    audit(who, `started draw for ${prize.name}`); return {};
+    audit(who.name, `started draw for ${prize.name}`); return {};
   },
   drawRemove(b, who) {
     const d = db.draws.find(x => x.id === b.id); if (!d) throw bad("Result not found", 404);
     db.draws = db.draws.filter(x => x !== d); if (db.stage.drawId === d.id) db.stage = { state: "idle", at: new Date().toISOString() };
-    audit(who, `removed result ${d.ticket} for ${d.prizeName}`); return {};
+    audit(who.name, `removed result ${d.ticket} for ${d.prizeName}`); return {};
   },
   stageReset(b, who) { if (db.stage.state === "rolling") throw bad("Wait for the current draw to finish", 409); db.stage = { state: "idle", at: new Date().toISOString() }; return {}; },
 };
@@ -273,7 +300,7 @@ const server = http.createServer(async (req, res) => {
 
     const session = readSession(req);
     if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, publicState());
-    if (req.method === "GET" && url.pathname === "/api/me") return send(res, 200, { admin: !!session, name: session?.name || null });
+    if (req.method === "GET" && url.pathname === "/api/me") return send(res, 200, { admin: !!session, name: session?.name || null, role: session?.role || null });
     if (req.method === "GET" && url.pathname === "/api/events") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
       res.write(`retry: 3000\nevent: changed\ndata: ${db.version}\n\n`);
@@ -289,10 +316,12 @@ const server = http.createServer(async (req, res) => {
       if (now > a.reset) { a.n = 0; a.reset = now + 15 * 60e3; }
       if (a.n >= 8) return send(res, 429, { error: "Too many attempts. Try again in 15 minutes." });
       const b = await body(req);
-      if (!passwordOk(b.password || "")) { a.n++; attempts.set(ip, a); return send(res, 401, { error: "Wrong password" }); }
+      const role = roleFor(b.password || "");
+      if (!role) { a.n++; attempts.set(ip, a); return send(res, 401, { error: "Wrong password" }); }
       attempts.delete(ip);
-      const name = str(b.name, 40) || "Manager";
-      return send(res, 200, { admin: true, name }, { "set-cookie": `rs=${makeSession(name)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}` });
+      const name = str(b.name, 40) || "Organiser";
+      audit(name, `signed in (${role})`); save();
+      return send(res, 200, { admin: true, name, role }, { "set-cookie": `rs=${makeSession(name, role)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}` });
     }
     if (url.pathname === "/api/logout") return send(res, 200, { admin: false }, { "set-cookie": "rs=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
 
@@ -301,7 +330,7 @@ const server = http.createServer(async (req, res) => {
     const name = url.pathname.replace("/api/admin/", "");
     const fn = Object.hasOwn(actions, name) ? actions[name] : null;
     if (!fn) return send(res, 404, { error: "Not found" });
-    const result = fn(await body(req), session.name);
+    const result = fn(await body(req), session);
     save();
     return send(res, 200, { ok: true, ...result });
   } catch (e) {

@@ -6,8 +6,9 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TZ = "Asia/Kathmandu";
 
 const EMPTY = {config:{title:"Dashain Raffle", lede:"", price:0, currency:"Rs", drawAt:null, prefix:"DSH", cap:0, perPerson:0}, prizes:[], sales:[], draws:[], stage:{state:"idle"}, inDraw:0};
-const S = {pub:EMPTY, adm:null, admin:false, me:null, tab:"board", sub:"sell", lastIssued:null};
+const S = {pub:EMPTY, adm:null, admin:false, me:null, role:null, tab:"board", sub:"sell", lastIssued:null};
 const cfg = () => S.pub.config;
+const isFin = () => S.admin && S.role === "finance";
 
 /* ---------------- helpers ---------------- */
 const pad = n => String(n).padStart(4, "0");
@@ -39,6 +40,31 @@ async function api(path, body){
 }
 async function act(path, body, okMsg){ try { const j = await api("/api/admin/" + path, body); if (okMsg) toast(okMsg); await load(); return j; } catch (e){ toast(e.message); return null; } }
 
+/* ---------------- pricing ---------------- */
+const bundles = () => { const b = (cfg().bundles || []).filter(x => x.qty > 0); return b.length ? [...b].sort((x, y) => x.qty - y.qty) : (cfg().price ? [{qty:1, price:cfg().price}] : []); };
+// cheapest exact combination for n tickets; mirrors priceFor() in server.js (the server's figure is what gets charged)
+function priceFor(n){
+  const bs = bundles(); if (!bs.length || n < 1) return null;
+  const best = [{amount:0, pick:null}];
+  for (let i = 1; i <= n; i++){ best[i] = null;
+    for (const b of bs) if (b.qty <= i && best[i - b.qty]){ const a = best[i - b.qty].amount + b.price; if (!best[i] || a < best[i].amount) best[i] = {amount:a, pick:b}; } }
+  if (!best[n]) return null;
+  const c = new Map(); for (let i = n; i > 0; i -= best[i].pick.qty) c.set(best[i].pick, (c.get(best[i].pick) || 0) + 1);
+  return {amount:best[n].amount, parts:[...c].sort((x, y) => y[0].qty - x[0].qty).map(([b, times]) => ({qty:b.qty, price:b.price, times}))};
+}
+const partsText = parts => (parts || []).map(p => `${p.times > 1 ? p.times + " × " : ""}${p.qty === 1 ? "single" : p.qty + " for " + money(p.price)}`).join(" + ");
+const saleAmount = s => s.amount ?? s.nums.length * (s.price ?? cfg().price ?? 0);
+const bestDeal = () => { const bs = bundles(); if (bs.length < 2) return null; return bs.reduce((a, b) => b.price / b.qty < a.price / a.qty ? b : a); };
+const priceLine = () => bundles().map(b => b.qty === 1 ? `${money(b.price)} each` : `${b.qty} for ${Number(b.price).toLocaleString("en-IN")}`).join(" · ");
+function upsell(n){ // smallest nudge up to +3 tickets that's free or cheaper than singles
+  const base = priceFor(n), single = bundles()[0]?.price || 0; if (!base) return null;
+  for (let m = n + 1; m <= n + 3; m++){ const p = priceFor(m); if (!p) continue;
+    const extra = p.amount - base.amount;
+    if (extra <= 0) return {m, extra:0, text:`<b>${m} tickets cost the same as ${n}.</b> Give them ${m - n} free?`};
+    if (single && extra < (m - n) * single && m - n === 1) return {m, extra, text:`One more ticket is only <b>${money(extra)}</b> (${partsText(p.parts)}).`}; }
+  return null;
+}
+
 /* ---------------- derived ---------------- */
 const pubPaid = () => S.pub.sales.filter(s => s.paid).reduce((a, s) => a + s.nums.length, 0);
 const pubSold = () => S.pub.sales.reduce((a, s) => a + s.nums.length, 0);
@@ -65,6 +91,7 @@ function setTab(t){
   if (t === "board") requestAnimationFrame(() => heroSky.size());
 }
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+addEventListener("hashchange", () => { const h = location.hash.replace("#", ""); if (["board","draw","manage"].includes(h) && h !== S.tab) setTab(h); });
 function setSub(t){
   S.sub = t;
   for (const b of document.querySelectorAll(".subtab")) b.setAttribute("aria-selected", b.dataset.sub === t);
@@ -91,7 +118,11 @@ function renderBoard(){
   $("stPrizes").textContent = prizeQty();
   $("stPrizesSub").textContent = S.pub.draws.length ? `${P} still to be won` : "to be won";
   $("stOdds").textContent = N && P ? pct(pWin(1, N, P)) : "—";
-  $("stPrice").textContent = c.price ? money(c.price) : "—";
+  const bd = bestDeal(), bs = bundles();
+  if (bd){ $("stPrice").textContent = `${bd.qty} for ${Number(bd.price).toLocaleString("en-IN")}`; $("stPriceSub").textContent = `${money(Math.round(bd.price / bd.qty))} a ticket` + (bs[0].qty === 1 ? ` · save ${money(bs[0].price * bd.qty - bd.price)}` : ""); }
+  else { $("stPrice").textContent = bs[0] ? money(bs[0].price) : "—"; $("stPriceSub").textContent = "per ticket"; }
+  $("tiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" class="tier ${bd && b.qty === bd.qty ? "best" : ""}" data-q="${b.qty}"><span class="q">${b.qty} ticket${b.qty > 1 ? "s" : ""}</span><span class="p">${esc(money(b.price))}</span><span class="e">${b.qty > 1 ? esc(money(Math.round(b.price / b.qty))) + " each" : "single"}</span></button>`).join("") : "";
+  $("calcTiers").innerHTML = bs.length > 1 ? bs.map(b => `<button type="button" data-q="${b.qty}" aria-pressed="false">${b.qty} · ${esc(money(b.price))}</button>`).join("") : "";
   if (c.cap > 0){ $("capBox").hidden = false; $("capTxt").textContent = `${Math.max(0, c.cap - total)} of ${c.cap}`; $("capBar").style.width = Math.min(100, total / c.cap * 100) + "%"; }
   else $("capBox").hidden = true;
 
@@ -135,13 +166,18 @@ function renderBoard(){
 
 function renderCalc(){
   const k = +$("calcRange").value, N = S.pub.inDraw, P = prizesLeft();
-  $("calcK").textContent = `${k} ticket${k > 1 ? "s" : ""}`;
+  const cost = priceFor(k);
+  $("calcK").textContent = `${k} ticket${k > 1 ? "s" : ""}${cost ? " · " + money(cost.amount) : ""}`;
+  document.querySelectorAll("#calcTiers button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.q === k));
   const p = N ? pWin(k, Math.max(N, k), P) : 0;
   $("calcPct").textContent = N && P ? pct(p) : "—";
   $("ringArc").setAttribute("stroke-dasharray", `${(p * 314.16).toFixed(1)} 314.16`);
   $("calcGrand").textContent = N && sortedPrizes()[0] ? `Grand prize alone: ${oneIn(Math.min(1, k / Math.max(N, k)))}, with ${N.toLocaleString("en-IN")} tickets in the draw today` : "Odds appear once paid tickets are in the draw.";
 }
 $("calcRange").oninput = renderCalc;
+const pickTier = e => { const b = e.target.closest("[data-q]"); if (!b) return; $("calcRange").value = b.dataset.q; renderCalc();
+  if (b.classList.contains("tier")) $("calcRange").closest(".panel").scrollIntoView({behavior:reduced ? "auto" : "smooth", block:"center"}); };
+$("calcTiers").onclick = pickTier; $("tiers").onclick = pickTier;
 
 function renderLookup(){
   const q = $("lookupQ").value.trim(), out = $("lookupOut");
@@ -175,23 +211,24 @@ setInterval(tick, 1000);
 /* ---------------- auth ---------------- */
 function renderAuth(){
   $("loginForm").hidden = S.admin; $("console").hidden = !S.admin;
-  $("whoName").textContent = S.admin ? `Signed in as ${S.me}` : "";
+  document.body.classList.toggle("is-finance", isFin());
+  $("whoName").innerHTML = S.admin ? `Signed in as <b>${esc(S.me)}</b> <span class="role-chip ${isFin() ? "finance" : ""}">${isFin() ? "Finance" : "Organiser"}</span>` : "";
   $("stageCtl").hidden = !S.admin;
 }
 $("loginForm").onsubmit = async e => {
   e.preventDefault(); $("lErr").textContent = "";
-  try { const j = await api("/api/login", {name:$("lName").value, password:$("lPass").value}); S.admin = true; S.me = j.name; $("lPass").value = ""; renderAuth(); await load(); toast(`Welcome, ${j.name}`); }
+  try { const j = await api("/api/login", {name:$("lName").value, password:$("lPass").value}); S.admin = true; S.me = j.name; S.role = j.role; $("lPass").value = ""; renderAuth(); await load(); toast(`Welcome, ${j.name}`); }
   catch (err){ $("lErr").textContent = err.message; }
 };
-$("logoutBtn").onclick = async () => { try { await api("/api/logout"); } catch {} S.admin = false; S.adm = null; renderAuth(); toast("Signed out"); };
+$("logoutBtn").onclick = async () => { try { await api("/api/logout"); } catch {} S.admin = false; S.adm = null; S.role = null; renderAuth(); toast("Signed out"); };
 
 /* ---------------- manage ---------------- */
 const admSales = () => S.adm ? S.adm.sales.filter(s => !s.void) : [];
 function renderManage(){
   if (!S.adm) return;
-  const live = admSales(), price = +cfg().price || 0;
-  const paidAmt = live.filter(s => s.paid).reduce((a, s) => a + s.nums.length * (s.price ?? price), 0);
-  const oweAmt = live.filter(s => !s.paid).reduce((a, s) => a + s.nums.length * (s.price ?? price), 0);
+  const live = admSales();
+  const paidAmt = live.filter(s => s.paid).reduce((a, s) => a + saleAmount(s), 0);
+  const oweAmt = live.filter(s => !s.paid).reduce((a, s) => a + saleAmount(s), 0);
   $("kSold").textContent = live.reduce((a, s) => a + s.nums.length, 0).toLocaleString("en-IN");
   $("kPaid").textContent = money(paidAmt); $("kOwe").textContent = money(oweAmt);
   $("kOweBox").classList.toggle("alert", oweAmt > 0);
@@ -216,14 +253,14 @@ function renderLedger(){
   $("lgBody").innerHTML = rows.length ? rows.map(s => `<tr class="${s.void ? "void" : ""}">
     <td class="mono">${esc(ranges(s.nums))}</td>
     <td>${esc(s.buyer)}${s.anon ? ' <span class="chip">hidden</span>' : ""}</td><td>${esc(s.dept || "")}</td>
-    <td class="num">${s.nums.length}</td><td class="num">${esc(money(s.nums.length * (s.price ?? price)))}</td><td>${esc(s.method || "")}</td>
+    <td class="num">${s.nums.length}</td><td class="num" title="${esc(partsText(s.pricing))}">${esc(money(saleAmount(s)))}</td><td>${esc(s.method || "")}</td>
     <td>${s.source === "book" ? '<span class="chip">Paper</span>' : '<span class="chip">Digital</span>'}</td>
     <td>${s.void ? '<span class="chip">Void</span>' : s.paid ? '<span class="chip green">Paid</span>' : '<span class="chip gold">Unpaid</span>'}</td>
     <td style="color:var(--ink-3)" title="${esc(s.soldBy ? "by " + s.soldBy : "")}">${ago(s.at)}</td>
-    <td class="acts">${s.void ? "" : `${s.paid ? `<button class="btn sm ghost" data-act="unpaid" data-id="${s.id}">Mark unpaid</button>` : `<button class="btn sm" data-act="paid" data-id="${s.id}">Mark paid</button>`}
+    <td class="acts">${s.void ? "" : `${!isFin() ? "" : s.paid ? `<button class="btn sm ghost" data-act="unpaid" data-id="${s.id}">Mark unpaid</button>` : `<button class="btn sm" data-act="paid" data-id="${s.id}">Mark paid</button>`}
       <button class="btn sm ghost" data-act="show" data-id="${s.id}">Ticket</button>
       <button class="btn sm ghost" data-act="print" data-id="${s.id}">Print</button>
-      <button class="btn sm ghost danger" data-act="void" data-id="${s.id}">Void</button>`}</td></tr>`).join("")
+      ${isFin() || !s.paid ? `<button class="btn sm ghost danger" data-act="void" data-id="${s.id}">Void</button>` : ""}`}</td></tr>`).join("")
     : `<tr><td colspan="10" class="empty" style="text-align:center">No sales match.</td></tr>`;
 }
 $("lgQ").oninput = renderLedger; $("lgF").onchange = renderLedger;
@@ -271,28 +308,53 @@ $("resBody").onclick = e => { const b = e.target.closest("[data-undo]"); if (b) 
 
 function fillSettings(){
   const c = cfg();
-  $("cTitle").value = c.title || ""; $("cLede").value = c.lede || ""; $("cPrice").value = c.price ?? 0; $("cCur").value = c.currency || "";
+  $("cTitle").value = c.title || ""; $("cLede").value = c.lede || ""; $("cCur").value = c.currency || "";
   $("cPrefix").value = c.prefix || ""; $("cCap").value = c.cap || 0; $("cPer").value = c.perPerson || 0; $("cUrl").value = c.publicUrl || location.host;
+  renderBundleRows(bundles().length ? bundles() : [{qty:1, price:0}]);
   $("cDraw").value = c.drawAt ? new Date(new Date(c.drawAt).getTime() + 345 * 60000).toISOString().slice(0, 16) : "";
 }
 $("sub-settings").onsubmit = e => {
   e.preventDefault(); const v = $("cDraw").value;
-  act("config", {title:$("cTitle").value, lede:$("cLede").value, price:$("cPrice").value, currency:$("cCur").value, prefix:$("cPrefix").value,
+  act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows()} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
     cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null}, "Settings saved");
 };
+
+function renderBundleRows(list){
+  $("bundleRows").innerHTML = list.map((b, i) => `<div class="brow">
+    <label class="f">Tickets<input type="number" id="bq-${i}" data-k="qty" min="1" max="100" value="${b.qty}" ${i === 0 ? "readonly" : ""}></label>
+    <label class="f">Price<input type="number" id="bp-${i}" data-k="price" min="0" value="${b.price}"></label>
+    <span class="each" id="be-${i}"></span>
+    ${i === 0 || !isFin() ? "<span></span>" : `<button type="button" class="btn sm ghost danger" data-rm="${i}">Remove</button>`}</div>`).join("")
+    + (isFin() ? "" : `<p class="hint">Only finance can change ticket prices.</p>`);
+  $("bundleRows").querySelectorAll("input").forEach(i => { if (!isFin()) i.readOnly = true; });
+  $("addBundle").hidden = !isFin();
+  eachHints();
+}
+const readBundleRows = () => [...$("bundleRows").querySelectorAll(".brow")].map(r => ({qty:+r.querySelector('[data-k=qty]').value, price:+r.querySelector('[data-k=price]').value}));
+function eachHints(){ readBundleRows().forEach((b, i) => { const e = $("be-" + i); if (e) e.textContent = b.qty > 0 ? `${money(Math.round(b.price / b.qty))} each` : ""; }); }
+$("bundleRows").oninput = eachHints;
+$("bundleRows").onclick = e => { const b = e.target.closest("[data-rm]"); if (!b) return; const l = readBundleRows(); l.splice(+b.dataset.rm, 1); renderBundleRows(l); };
+$("addBundle").onclick = () => { const l = readBundleRows(), last = l[l.length - 1] || {qty:1, price:0}; l.push({qty:last.qty + 2, price:Math.round(last.price / last.qty * (last.qty + 2) * .8)}); renderBundleRows(l); };
 
 /* ---------------- digital sale ---------------- */
 const clampCount = () => { const i = $("sCount"); i.value = Math.max(1, Math.min(100, parseInt(i.value, 10) || 1)); updateTotal(); };
 $("sMinus").onclick = () => { $("sCount").value = (+$("sCount").value || 1) - 1; clampCount(); };
 $("sPlus").onclick = () => { $("sCount").value = (+$("sCount").value || 1) + 1; clampCount(); };
 $("sCount").onchange = clampCount; $("sCount").oninput = updateTotal;
-function updateTotal(){ const n = parseInt($("sCount").value, 10) || 0; $("sTotal").textContent = cfg().price ? money(n * cfg().price) : "Set a price in Settings"; }
+function updateTotal(){
+  const n = parseInt($("sCount").value, 10) || 0, p = priceFor(n), up = n ? upsell(n) : null;
+  $("sTotal").textContent = p ? money(p.amount) : "Set prices in Settings";
+  $("sBreak").textContent = p && p.parts.length && !(p.parts.length === 1 && p.parts[0].times === 1 && p.parts[0].qty === 1) ? partsText(p.parts) : "";
+  const h = $("sHint"); h.hidden = !up;
+  if (up) h.innerHTML = `<span>${up.text}</span><button type="button" class="btn sm" data-to="${up.m}">Make it ${up.m}</button>`;
+}
+$("sHint").onclick = e => { const b = e.target.closest("[data-to]"); if (!b) return; $("sCount").value = b.dataset.to; S.lastIssued = null; updateTotal(); renderTicket(null); };
 ["sBuyer","sDept","sCount"].forEach(id => $(id).addEventListener("input", () => { S.lastIssued = null; renderTicket(null); }));
 
 $("sellForm").onsubmit = async e => {
   e.preventDefault();
   const btn = $("sSubmit"); btn.disabled = true; btn.textContent = "Generating…";
-  const j = await act("sale", {buyer:$("sBuyer").value, dept:$("sDept").value, count:$("sCount").value, method:$("sMethod").value, paid:$("sPaid").checked, anon:$("sAnon").checked});
+  const j = await act("sale", {buyer:$("sBuyer").value, dept:$("sDept").value, count:$("sCount").value, method:$("sMethod").value, paid:isFin() && $("sPaid").checked, anon:$("sAnon").checked});
   btn.disabled = false; btn.textContent = "Generate tickets";
   if (!j) return;
   S.lastIssued = j.sale; renderTicket(j.sale);
@@ -321,7 +383,7 @@ function renderTicket(s){
 }
 function buyerMessage(s){
   const c = cfg();
-  return `Your ${c.title || "Dashain Raffle"} ticket${s.nums.length > 1 ? "s" : ""}: ${ranges(s.nums)}${s.nums.length > 1 ? ` (${s.nums.length} tickets)` : ""}\n${c.drawAt ? "Draw: " + fmtDate(c.drawAt) + " (NPT)\n" : ""}${s.paid ? "Payment received. You're in the draw." : "Payment pending. Your tickets enter the draw once paid."}\nFollow the odds and the live draw at https://${c.publicUrl || location.host}\nशुभ दशैं!`;
+  return `Your ${c.title || "Dashain Raffle"} ticket${s.nums.length > 1 ? "s" : ""}: ${ranges(s.nums)}${s.nums.length > 1 ? ` (${s.nums.length} tickets)` : ""}\n${c.drawAt ? "Draw: " + fmtDate(c.drawAt) + " (NPT)\n" : ""}${s.paid ? `Paid ${money(saleAmount(s))}. You're in the draw.` : `Amount due: ${money(saleAmount(s))}. Your tickets enter the draw once paid.`}\nFollow the odds and the live draw at https://${c.publicUrl || location.host}\nशुभ दशैं!`;
 }
 $("copyMsg").onclick = () => { const s = S.lastIssued; if (!s) return;
   navigator.clipboard.writeText(buyerMessage(s)).then(() => toast("Copied. Paste it to the buyer on Slack or email."), () => toast("Copy isn't available here. Select the ticket text manually.")); };
@@ -378,14 +440,15 @@ $("bookForm").onsubmit = async e => {
 };
 function updatePaperTotal(){
   const nums = parseNums($("pNums").value);
+  $("pBreak").textContent = "";
   if (!$("pNums").value.trim()){ $("pSummary").textContent = "Total due"; $("pTotal").textContent = "—"; return; }
   if (!nums){ $("pSummary").textContent = "Check the numbers"; $("pTotal").textContent = "—"; return; }
-  $("pSummary").textContent = `${nums.length} ticket${nums.length > 1 ? "s" : ""}`; $("pTotal").textContent = cfg().price ? money(nums.length * cfg().price) : "—";
+  $("pSummary").textContent = `${nums.length} ticket${nums.length > 1 ? "s" : ""}`; const pp = priceFor(nums.length); $("pTotal").textContent = pp ? money(pp.amount) : "—"; $("pBreak").textContent = pp && nums.length > 1 ? partsText(pp.parts) : "";
 }
 $("pNums").oninput = updatePaperTotal;
 $("paperForm").onsubmit = async e => {
   e.preventDefault();
-  const j = await act("bookSale", {nums:$("pNums").value, buyer:$("pBuyer").value, dept:$("pDept").value, method:$("pMethod").value, paid:$("pPaid").checked, anon:$("pAnon").checked});
+  const j = await act("bookSale", {nums:$("pNums").value, buyer:$("pBuyer").value, dept:$("pDept").value, method:$("pMethod").value, paid:isFin() && $("pPaid").checked, anon:$("pAnon").checked});
   if (!j) return;
   toast(`Recorded ${ranges(j.sale.nums)} for ${j.sale.buyer}`);
   ["pNums","pBuyer","pDept"].forEach(id => $(id).value = ""); $("pAnon").checked = false; updatePaperTotal(); $("pNums").focus();
@@ -407,7 +470,7 @@ function printTickets(items){
     </div>
     <div class="main">
       <div>
-        <div class="ev">${esc(c.title || "Dashain Raffle")}${c.price ? " · " + esc(money(c.price)) : ""}</div>
+        <div class="ev">${esc(c.title || "Dashain Raffle")}${bundles().length ? " · " + esc(priceLine()) : ""}</div>
         <div class="ttl">शुभ विजया दशमी</div>
         <div class="no">${esc(tno(it.n))}</div>
         <div class="nm">${esc(it.buyer || "")}</div>
@@ -433,7 +496,7 @@ function printBook(b){
 $("csvBtn").onclick = () => {
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`, price = +cfg().price || 0;
   const rows = [["Tickets","Buyer","Team","Qty","Amount","Method","Type","Paid","Void","Hidden from board","Sold at","Sold by"]]
-    .concat([...S.adm.sales].sort((a, b) => a.nums[0] - b.nums[0]).map(s => [ranges(s.nums), s.buyer, s.dept, s.nums.length, s.nums.length * (s.price ?? price), s.method, s.source === "book" ? "paper" : "digital", s.paid ? "yes" : "no", s.void ? "yes" : "no", s.anon ? "yes" : "no", s.at, s.soldBy]));
+    .concat([...S.adm.sales].sort((a, b) => a.nums[0] - b.nums[0]).map(s => [ranges(s.nums), s.buyer, s.dept, s.nums.length, saleAmount(s), s.method, s.source === "book" ? "paper" : "digital", s.paid ? "yes" : "no", s.void ? "yes" : "no", s.anon ? "yes" : "no", s.at, s.soldBy]));
   downloadBlob(new Blob(["﻿" + rows.map(r => r.map(q).join(",")).join("\n")], {type:"text/csv"}), "dashain-raffle-sales.csv"); toast("CSV saved");
 };
 
@@ -489,6 +552,28 @@ function slowStop(done){
 function stopReel(){ clearInterval(reelTimer); clearTimeout(reelTimer); $("reel").classList.remove("rolling"); }
 $("drawBtn").onclick = () => { const id = $("drawPrize").value; if (id){ $("drawBtn").disabled = true; act("draw", {prizeId:id}); } };
 $("stageReset").onclick = () => act("stageReset", {}, "Stage cleared");
+
+function renderPrizeBoard(){
+  const sp = sortedPrizes(), st = S.pub.stage || {}, drawn = S.pub.draws.length, total = prizeQty();
+  $("pbSub").textContent = total ? `${drawn} of ${total} drawn` : "";
+  $("pbList").innerHTML = sp.length ? sp.map((p, i) => {
+    const qty = p.qty || 1, got = S.pub.draws.filter(d => d.prizeId === p.id).sort((a, b) => (a.at || "").localeCompare(b.at || ""));
+    const now = st.prizeId === p.id && (st.state === "rolling" || st.state === "revealed");
+    const ws = got.map(d => `<span class="w"><span class="t">${esc(tno(d.ticket))}</span><b>${esc(d.name)}</b>${d.dept ? `<span style="color:var(--ink-3)">${esc(d.dept)}</span>` : ""}</span>`)
+      .concat(Array.from({length:Math.max(0, qty - got.length)}, () => `<span class="w slot">${now && st.state === "rolling" ? "Drawing now…" : "To be drawn"}</span>`));
+    return `<li class="pb ${i === 0 ? "grand" : ""} ${got.length >= qty ? "done" : ""} ${now ? "now" : ""}"><span class="rk">${p.order ?? i + 1}</span>
+      <div class="nm">${esc(p.name)}<small>${rankLabel(i)}${qty > 1 ? ` · ${qty} winners` : ""}${p.value ? ` · worth ${esc(money(p.value))}` : ""}</small></div>
+      <div class="ws">${ws.join("")}</div></li>`;
+  }).join("") : `<li class="empty">No prizes yet.</li>`;
+}
+function setPrizeBoard(open){
+  $("prizeBoard").hidden = !open; $("listToggle").setAttribute("aria-expanded", open);
+  $("listToggle").textContent = open ? "Hide prizes & winners" : "Show prizes & winners";
+  try { localStorage.setItem("raffle.pb", open ? "1" : "0"); } catch {}
+  if (open && S.tab === "draw") $("prizeBoard").scrollIntoView({behavior:reduced ? "auto" : "smooth", block:"start"});
+}
+$("listToggle").onclick = () => setPrizeBoard($("prizeBoard").hidden);
+try { if (localStorage.getItem("raffle.pb") === "1"){ $("prizeBoard").hidden = false; $("listToggle").setAttribute("aria-expanded", "true"); $("listToggle").textContent = "Hide prizes & winners"; } } catch {}
 
 /* ---------------- ambient ---------------- */
 function kiteSky(canvas, count, dark){
@@ -558,6 +643,7 @@ function renderTicker(){
     top ? `${esc(top[0])} leads with <b>${top[1]}</b> tickets. Is your team next?` : null,
     days != null && days > 0 ? `<b>${days}</b> day${days > 1 ? "s" : ""} until the live draw` : null,
     prizesLeft() ? `<b>${prizesLeft()}</b> prizes still up for grabs` : null,
+    bestDeal() ? `Best value: <b>${bestDeal().qty} tickets for ${esc(money(bestDeal().price))}</b>` : null,
   ].filter(Boolean);
   const kite = `<svg width="13" height="15" viewBox="0 0 30 34" aria-hidden="true"><path d="M15 1 L28 13 L15 25 L2 13 Z" fill="#FFB930"/><path d="M15 1 L15 25 M2 13 L28 13" stroke="#C4122F" stroke-width="2"/></svg>`;
   const items = []; let si = 0;
@@ -580,7 +666,7 @@ function nextPop(){
   popBusy = true;
   $("popT").innerHTML = `<b>${esc(s.name)}</b>${s.dept ? ` from ${esc(s.dept)}` : ""} just bought <b>${s.nums.length} ticket${s.nums.length > 1 ? "s" : ""}</b>`;
   const N = S.pub.inDraw;
-  $("popS").innerHTML = N ? `Grand prize odds are now <span class="hot">1 in ${N.toLocaleString("en-IN")}</span>${cfg().price ? ` · ${esc(money(cfg().price))} a ticket` : ""}` : "Get yours before the draw";
+  $("popS").innerHTML = N ? `Grand prize odds are now <span class="hot">1 in ${N.toLocaleString("en-IN")}</span>${bestDeal() ? ` · ${bestDeal().qty} for ${esc(money(bestDeal().price))}` : cfg().price ? ` · ${esc(money(cfg().price))} a ticket` : ""}` : "Get yours before the draw";
   el.classList.add("show");
   clearTimeout(popTimer); popTimer = setTimeout(hidePop, 6500);
 }
@@ -589,7 +675,7 @@ $("popX").onclick = hidePop;
 
 /* ---------------- data ---------------- */
 function setLive(ok, txt){ $("liveDot").classList.toggle("off", !ok); $("liveTxt").textContent = txt; }
-function renderAll(){ renderBoard(); renderTicker(); renderStageCtl(); renderStage(); renderManage(); tick(); }
+function renderAll(){ renderBoard(); renderTicker(); renderStageCtl(); renderStage(); renderPrizeBoard(); renderManage(); tick(); }
 let loading = null, again = false;
 async function load(){
   if (loading){ again = true; return loading; }
@@ -616,7 +702,7 @@ function connect(){
 }
 async function boot(){
   const h = (location.hash || "").replace("#", ""); if (["draw","manage"].includes(h)) setTab(h);
-  try { const me = await (await fetch("/api/me", {cache:"no-store"})).json(); S.admin = !!me.admin; S.me = me.name; } catch {}
+  try { const me = await (await fetch("/api/me", {cache:"no-store"})).json(); S.admin = !!me.admin; S.me = me.name; S.role = me.role; } catch {}
   renderAuth(); await load(); connect();
   setInterval(() => { if (S.tab === "board") renderBoard(); refreshTickerTimes(); }, 30000);
 }
