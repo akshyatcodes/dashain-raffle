@@ -271,8 +271,8 @@ td.acts .btn + .btn{margin-left:6px}
   #printRoot{display:block}
   .psheet{page-break-after:always;break-after:page;display:flex;flex-direction:column;gap:0}
   .psheet:last-child{page-break-after:auto;break-after:auto}
-  .pt{display:grid;grid-template-columns:58mm 1fr;height:54.5mm;border:.3mm dashed #999;border-bottom:none;break-inside:avoid;color:#1A1410;font-family:"Mukta",sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .pt:last-child{border-bottom:.3mm dashed #999}
+  .pt{display:grid;grid-template-columns:58mm 1fr;height:54.5mm;border:.4mm dotted #888;border-bottom:none;break-inside:avoid;color:#1A1410;font-family:"Mukta",sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pt:last-child{border-bottom:.4mm dotted #888}
   .pt .stub{padding:4mm 4mm 3mm;border-right:.5mm dashed #C4122F;display:flex;flex-direction:column;gap:1.4mm;font-size:8.5pt;background:#FFFBF1}
   .pt .stub .sn{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:13pt;color:#C4122F}
   .pt .stub .ln{display:flex;gap:2mm;align-items:flex-end}
@@ -426,9 +426,9 @@ body.is-finance .org-only{display:none!important}
 .tell pre{margin:0;white-space:pre-wrap;font-family:var(--body);font-size:.9rem;background:var(--paper);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;color:var(--ink)}
 .tell .acts{display:flex;gap:8px;flex-wrap:wrap}
 @media print{
-  .slipsheet{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:26.5mm;page-break-after:always;break-after:page}
+  .slipsheet{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:26.5mm;page-break-after:always;break-after:page;border-top:.4mm dotted #888;border-left:.4mm dotted #888}
   .slipsheet:last-child{page-break-after:auto;break-after:auto}
-  .slip{border:.3mm dashed #999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1mm;font-family:"Mukta",sans-serif;color:#1A1410;overflow:hidden;padding:1mm 2mm;text-align:center}
+  .slip{border-right:.4mm dotted #888;border-bottom:.4mm dotted #888;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1mm;font-family:"Mukta",sans-serif;color:#1A1410;overflow:hidden;padding:1mm 2mm;text-align:center}
   .slip .n{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:17pt;line-height:1;color:#C4122F}
   .slip .b{font-size:8pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 }
