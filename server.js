@@ -158,7 +158,7 @@ function publicState(req, force = false) {
   const config = { ...cfg, logoUrl: logo ? "/uploads/" + logo : null, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) };
   if (!open) { delete config.bundles; delete config.price; config.collectors = []; }
   return {
-    version: db.version, prizes: db.prizes, salesOpen: salesOpen(), locked: !open, gated: gateOn(),
+    version: db.version, prizes: prizesPublic(), salesOpen: salesOpen(), locked: !open, gated: gateOn(),
     config,
     sales: liveSales().map(s => ({ id: s.id, name: publicName(s), dept: s.anon ? "" : s.dept, nums: s.nums, paid: s.paid, at: s.at })),
     draws: db.draws.map(d => { const s = saleFor(d.ticket); return { id: d.id, prizeId: d.prizeId, prizeName: d.prizeName, ticket: d.ticket, name: s ? publicName(s) : "—", dept: s && !s.anon ? s.dept : "", at: d.at }; }),
@@ -169,7 +169,8 @@ function stagePublic() {
   const st = db.stage; if (st.state !== "revealed") return st;
   const s = saleFor(st.ticket); return { ...st, name: s ? publicName(s) : "", dept: s && !s.anon ? s.dept : "" };
 }
-function adminState() { return { ...db, config: { ...db.config, logoUrl: db.config.logo ? "/uploads/" + db.config.logo : null, collectors: db.config.collectors.map(c => ({ ...c, qrUrl: c.qr ? "/uploads/" + c.qr : null })) }, salesOpen: salesOpen(), stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
+const prizesPublic = () => db.prizes.map(p => ({ ...p, imageUrl: p.image ? "/uploads/" + p.image : null }));
+function adminState() { return { ...db, prizes: prizesPublic(), config: { ...db.config, logoUrl: db.config.logo ? "/uploads/" + db.config.logo : null, collectors: db.config.collectors.map(c => ({ ...c, qrUrl: c.qr ? "/uploads/" + c.qr : null })) }, salesOpen: salesOpen(), stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
 
 /* ---------------- sessions ---------------- */
 const sign = v => crypto.createHmac("sha256", SESSION_SECRET).update(v).digest("base64url");
@@ -292,7 +293,20 @@ const actions = {
   },
   prizeDelete(b, who) {
     if (db.draws.some(d => d.prizeId === b.id)) throw bad("This prize has been drawn. Remove its results first.");
+    const p = db.prizes.find(x => x.id === b.id); if (p?.image) fs.rm(path.join(UPLOAD_DIR, p.image), () => {});
     db.prizes = db.prizes.filter(p => p.id !== b.id); audit(who.name, `deleted prize ${b.id}`); return {};
+  },
+  prizeImage(b, who) {
+    const p = db.prizes.find(x => x.id === b.id); if (!p) throw bad("Save the prize first, then upload an image");
+    if (b.remove) { if (p.image) fs.rm(path.join(UPLOAD_DIR, p.image), () => {}); p.image = null; audit(who.name, `removed image for ${p.name}`); return {}; }
+    const m = String(b.dataUrl || "").match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/); if (!m) throw bad("Upload a PNG, JPG or WebP image");
+    const buf = Buffer.from(m[2], "base64"); if (buf.length > 2 * 1024 * 1024) throw bad("That image is over 2 MB. Use a smaller photo.");
+    const sig = { png: [0x89, 0x50, 0x4e, 0x47], jpeg: [0xff, 0xd8, 0xff], webp: [0x52, 0x49, 0x46, 0x46] }[m[1]];
+    if (!sig.every((v, i) => buf[i] === v)) throw bad("That file isn't a valid image");
+    const file = `prize-${p.id}-${crypto.randomBytes(4).toString("hex")}.${m[1] === "jpeg" ? "jpg" : m[1]}`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, file), buf);
+    if (p.image) fs.rm(path.join(UPLOAD_DIR, p.image), () => {});
+    p.image = file; audit(who.name, `uploaded image for ${p.name}`); return { image: "/uploads/" + file };
   },
   config(b, who) {
     const c = db.config;
@@ -459,7 +473,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: db.version });
     if (url.pathname.startsWith("/uploads/")) {
-      const f = url.pathname.slice(9); if (!/^(qr-c-[a-z0-9-]+|logo-[a-z0-9]+)\.(png|jpg|webp)$/.test(f)) return send(res, 404, { error: "Not found" });
+      const f = url.pathname.slice(9); if (!/^(qr-c-[a-z0-9-]+|logo-[a-z0-9]+|prize-[a-z0-9-]+)\.(png|jpg|webp)$/.test(f)) return send(res, 404, { error: "Not found" });
       return fs.readFile(path.join(UPLOAD_DIR, f), (err, buf) => {
         if (err) return send(res, 404, { error: "Not found" });
         res.writeHead(200, { "content-type": { png: "image/png", jpg: "image/jpeg", webp: "image/webp" }[f.split(".").pop()], "cache-control": "public, max-age=86400, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" });
@@ -513,7 +527,7 @@ const server = http.createServer(async (req, res) => {
     const name = url.pathname.replace("/api/admin/", "");
     const fn = Object.hasOwn(actions, name) ? actions[name] : null;
     if (!fn) return send(res, 404, { error: "Not found" });
-    const result = fn(await body(req, name === "collectorQr" || name === "logoUpload" ? 3 * 1024 * 1024 : 64 * 1024), session);
+    const result = fn(await body(req, name === "collectorQr" || name === "logoUpload" || name === "prizeImage" ? 3 * 1024 * 1024 : 64 * 1024), session);
     save();
     return send(res, 200, { ok: true, ...result });
   } catch (e) {

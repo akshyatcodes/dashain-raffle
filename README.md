@@ -79,7 +79,7 @@ Everything lives in `DATA_DIR`:
 ```
 raffle.json          all state: settings, prizes, sales, books, draws, audit log (written atomically)
 snapshots/           hourly copies of raffle.json, last 72 kept
-uploads/             collector QR images
+uploads/             collector QR images, prize photos, company logo
 ```
 
 **Back up this folder.** A restore means putting the folder back and starting the container. See [OPERATIONS.md](docs/OPERATIONS.md#backup-and-restore).

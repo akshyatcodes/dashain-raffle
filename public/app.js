@@ -138,6 +138,7 @@ function renderBoard(){
     const qty = p.qty || 1, got = S.pub.draws.filter(d => d.prizeId === p.id), left = qty - got.length, kc = kiteColors[i % kiteColors.length];
     const winners = got.map(d => `<div class="won-by">Won by ${esc(d.name)} · <span class="mono">${esc(tno(d.ticket))}</span></div>`).join("");
     return `<article class="prize ${i === 0 ? "grand" : ""} ${left <= 0 ? "done" : ""}">
+      ${p.imageUrl ? `<img class="photo" src="${esc(p.imageUrl)}" alt="${esc(p.name)}" loading="lazy">` : ""}
       <div class="rank">${kiteSVG(kc[0], kc[1], i === 0 ? 30 : 22)}<span class="eyebrow">${rankLabel(i)}</span>${p.sample ? '<span class="chip gold">Sample</span>' : ""}</div>
       <h3>${esc(p.name)}</h3>
       <div class="meta">${qty > 1 ? `<span class="chip">${qty} winners</span>` : ""}${p.value ? `<span class="chip">Worth ${esc(money(p.value))}</span>` : ""}${p.sponsor ? `<span class="chip">Sponsored by ${esc(p.sponsor)}</span>` : ""}${left <= 0 ? '<span class="chip green">Won</span>' : got.length ? `<span class="chip green">${got.length} won</span>` : ""}</div>
@@ -216,16 +217,23 @@ function renderWindow(){
   $("cdLabel").textContent = open && c.salesCloseAt ? "Ticket sales close in" : "Live draw in";
   $("heroCta").hidden = !(selfOn() && open);
   $("tab-buy").hidden = !selfOn();
+  // the main countdown already targets the draw once sales are closed (or there's no close date);
+  // the second block only adds value while it's showing the sales-close countdown instead
+  $("cdDrawBlock").hidden = !(open && c.salesCloseAt && c.drawAt);
+}
+function tickBox(target, ids){
+  const t = target ? new Date(target) - Date.now() : NaN;
+  const set = (id, v) => { const e = $(id), s = String(v).padStart(2, "0"); if (e.textContent !== s) e.textContent = s; };
+  if (isNaN(t)){ ids.forEach(i => $(i).textContent = "--"); return; }
+  const x = Math.max(0, t / 1000);
+  set(ids[0], Math.floor(x / 86400)); set(ids[1], Math.floor(x % 86400 / 3600)); set(ids[2], Math.floor(x % 3600 / 60)); set(ids[3], Math.floor(x % 60));
 }
 function tick(){
   const target = salesOpen() && cfg().salesCloseAt ? cfg().salesCloseAt : cfg().drawAt;
   if (tick._open !== undefined && tick._open !== salesOpen()){ renderWindow(); if (S.tab === "buy") renderBuy(); }
   tick._open = salesOpen();
-  const t = target ? new Date(target) - Date.now() : NaN;
-  const set = (id, v) => { const e = $(id), s = String(v).padStart(2, "0"); if (e.textContent !== s) e.textContent = s; };
-  if (isNaN(t)){ ["cdD","cdH","cdM","cdS"].forEach(i => $(i).textContent = "--"); return; }
-  const x = Math.max(0, t / 1000);
-  set("cdD", Math.floor(x / 86400)); set("cdH", Math.floor(x % 86400 / 3600)); set("cdM", Math.floor(x % 3600 / 60)); set("cdS", Math.floor(x % 60));
+  tickBox(target, ["cdD","cdH","cdM","cdS"]);
+  if (!$("cdDrawBlock").hidden) tickBox(cfg().drawAt, ["cdD2","cdH2","cdM2","cdS2"]);
 }
 setInterval(tick, 1000);
 
@@ -310,14 +318,26 @@ function renderPrizeEditor(){
     <label class="f">Sponsor<input type="text" id="ps-${p.id}" value="${esc(p.sponsor || "")}" data-k="sponsor" maxlength="40"></label>
     <label class="f">Order<input type="number" id="po-${p.id}" value="${p.order ?? ""}" min="1" data-k="order"></label>
     <div style="display:flex;gap:6px"><button class="btn sm" data-save="${p.id}">Save</button><button class="btn sm ghost danger" data-del="${p.id}">Delete</button></div>
+    <div class="qr" style="grid-column:1/-1">
+      ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="Photo for ${esc(p.name)}" style="height:48px;width:80px;object-fit:cover;border-radius:6px">` : `<span class="none">No photo yet</span>`}
+      <label class="btn sm">Upload photo<input type="file" accept="image/png,image/jpeg,image/webp" data-img="${esc(p.id)}" hidden></label>
+      ${p.imageUrl ? `<button type="button" class="btn sm ghost" data-imgrm="${esc(p.id)}">Remove photo</button>` : ""}
+    </div>
   </div>`).join("") : `<div class="empty">No prizes yet.</div>`;
 }
 $("prizeEditor").onclick = e => {
-  const sv = e.target.closest("[data-save]"), dl = e.target.closest("[data-del]");
+  const sv = e.target.closest("[data-save]"), dl = e.target.closest("[data-del]"), rm = e.target.closest("[data-imgrm]");
   if (sv){ const row = sv.closest(".prize-edit"), d = {id:sv.dataset.save};
     row.querySelectorAll("input[data-k]").forEach(i => d[i.dataset.k] = i.type === "number" ? (i.value === "" ? null : +i.value) : i.value);
     sv.blur(); act("prizeUpsert", d, "Prize saved"); }
   if (dl) armed(dl, () => act("prizeDelete", {id:dl.dataset.del}, "Prize deleted"));
+  if (rm) act("prizeImage", {id:rm.dataset.imgrm, remove:true}, "Photo removed").then(renderPrizeEditor);
+};
+$("prizeEditor").onchange = e => {
+  const f = e.target.closest("[data-img]"); if (!f || !f.files[0]) return;
+  const file = f.files[0]; if (file.size > 2 * 1024 * 1024) return toast("That image is over 2 MB. Use a smaller photo.");
+  const rd = new FileReader(); rd.onload = () => act("prizeImage", {id:f.dataset.img, dataUrl:rd.result}, "Photo uploaded").then(renderPrizeEditor);
+  rd.readAsDataURL(file);
 };
 $("addPrize").onclick = () => act("prizeUpsert", {name:"New prize", qty:1, value:null, sponsor:"", order:S.pub.prizes.reduce((m, p) => Math.max(m, p.order || 0), 0) + 1}, "Prize added. Edit its details below.");
 

@@ -85,7 +85,9 @@ section.block{margin-top:36px}
 
 /* prizes */
 .prizes{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-.prize{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.prize{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.prize .photo{margin:-16px -16px 4px;aspect-ratio:16/9;width:calc(100% + 32px);object-fit:cover;display:block;background:var(--paper-2,var(--paper))}
+.prize.grand .photo{aspect-ratio:21/9}
 .prize.grand{grid-column:span 2;background:linear-gradient(135deg,var(--marigold-soft),var(--paper) 60%);border-color:color-mix(in srgb,var(--marigold) 50%,var(--line))}
 .prize .rank{display:flex;align-items:center;gap:8px}
 .prize .rank svg{flex:none}
