@@ -17,7 +17,8 @@
 <header class="top">
   <div class="wrap">
     <div class="brand">
-      <svg width="30" height="34" viewBox="0 0 30 34" aria-hidden="true"><path d="M15 1 L28 13 L15 25 L2 13 Z" fill="var(--tika)"/><path d="M15 1 L15 25 M2 13 L28 13" stroke="var(--marigold)" stroke-width="1.6"/><path d="M15 25 q-3 3 0 5 q3 2 0 4" stroke="var(--ink-3)" stroke-width="1.3" fill="none"/></svg>
+      <svg width="30" height="34" viewBox="0 0 30 34" aria-hidden="true" id="brandKite"><path d="M15 1 L28 13 L15 25 L2 13 Z" fill="var(--tika)"/><path d="M15 1 L15 25 M2 13 L28 13" stroke="var(--marigold)" stroke-width="1.6"/><path d="M15 25 q-3 3 0 5 q3 2 0 4" stroke="var(--ink-3)" stroke-width="1.3" fill="none"/></svg>
+      <img id="brandLogo" alt="Company logo" hidden style="height:34px;width:34px;object-fit:contain;border-radius:6px">
       <div><b id="brandTitle">Dashain Raffle</b><small id="brandSub">Company-wide · 2026</small></div>
     </div>
     <span class="live-dot off" id="liveDot"><i></i><span id="liveTxt">Connecting…</span></span>
@@ -318,12 +319,27 @@
         <h2>Event settings</h2>
         <div class="frow">
           <label class="f">Event name<input type="text" id="cTitle" maxlength="60"></label>
-          <label class="f">Tagline<input type="text" id="cLede" maxlength="160"></label>
+          <label class="f">Tagline (shown on the board)<input type="text" id="cLede" maxlength="160"></label>
         </div>
         <div class="frow">
+          <label class="f">Header byline<input type="text" id="cHeaderTag" maxlength="60" placeholder="e.g. Company-wide · 2026"></label>
           <label class="f">Currency label<input type="text" id="cCur" maxlength="6"></label>
-          <span></span>
         </div>
+        <fieldset class="bundles">
+          <legend>Company logo</legend>
+          <p class="hint">Shown next to the event name in the header, in place of the kite icon. PNG, JPG or WebP, under 2 MB.</p>
+          <div class="qr" id="logoBox">
+            <img id="logoPreview" alt="Company logo" hidden style="height:48px;width:48px;object-fit:contain;border-radius:6px">
+            <span class="none" id="logoNone">No logo yet</span>
+            <label class="btn sm">Upload logo<input type="file" accept="image/png,image/jpeg,image/webp" id="logoFile" hidden></label>
+            <button type="button" class="btn sm ghost" id="logoRm" hidden>Remove logo</button>
+          </div>
+        </fieldset>
+        <fieldset class="bundles">
+          <legend>Departments / teams</legend>
+          <p class="hint">One per line. Shown as suggestions on the Team field so buyers and organisers pick a consistent name. Leave blank to let people type any team name freely.</p>
+          <textarea id="cDepts" rows="4" maxlength="2000" style="width:100%;font:inherit" placeholder="e.g.&#10;Sales&#10;Engineering&#10;Finance&#10;Operations"></textarea>
+        </fieldset>
         <fieldset class="bundles">
           <legend>Ticket prices</legend>
           <p class="hint">A single-ticket price is required. Add bundles like "3 for 500". Every sale is charged the cheapest combination.</p>

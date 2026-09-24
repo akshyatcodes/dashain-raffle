@@ -5,7 +5,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TZ = "Asia/Kathmandu";
 
-const EMPTY = {config:{title:"Dashain Raffle", lede:"", price:0, currency:"Rs", drawAt:null, prefix:"DSH", cap:0, perPerson:0}, prizes:[], sales:[], draws:[], stage:{state:"idle"}, inDraw:0};
+const EMPTY = {config:{title:"Dashain Raffle", lede:"", headerTag:"Company-wide · 2026", departments:[], logoUrl:null, price:0, currency:"Rs", drawAt:null, prefix:"DSH", cap:0, perPerson:0}, prizes:[], sales:[], draws:[], stage:{state:"idle"}, inDraw:0};
 const S = {pub:EMPTY, adm:null, admin:false, me:null, role:null, tab:"board", sub:"sell", lastIssued:null};
 const cfg = () => S.pub.config;
 const isFin = () => S.admin && S.role === "finance";
@@ -112,6 +112,9 @@ function renderBoard(){
   const c = cfg(), title = c.title || "Dashain Raffle";
   document.title = title;
   $("brandTitle").textContent = title; $("heroTitle").textContent = title;
+  $("brandSub").textContent = c.headerTag || "";
+  if (c.logoUrl) { $("brandLogo").src = c.logoUrl; $("brandLogo").hidden = false; $("brandKite").hidden = true; }
+  else { $("brandLogo").hidden = true; $("brandKite").hidden = false; }
   if (c.lede) $("heroLede").textContent = c.lede;
   $("drawWhen").textContent = c.drawAt ? "Live draw · " + fmtDate(c.drawAt) + " (NPT)" : "Draw date to be announced";
 
@@ -150,7 +153,7 @@ function renderBoard(){
   $("deptBoard").innerHTML = depts.length ? depts.slice(0, 10).map(([d, n]) =>
     `<div class="dept"><span class="name" title="${esc(d)}">${esc(d)}</span><div class="track"><i style="width:${n / max * 100}%"></i></div><span class="n">${n}</span></div>`).join("")
     : `<div class="empty">No tickets yet. First team on the board wins bragging rights.</div>`;
-  const allDepts = new Set(Object.keys(by)); if (S.adm) for (const s of S.adm.sales) if (s.dept) allDepts.add(s.dept);
+  const allDepts = new Set(c.departments || []); for (const d of Object.keys(by)) allDepts.add(d); if (S.adm) for (const s of S.adm.sales) if (s.dept) allDepts.add(s.dept);
   $("deptList").innerHTML = [...allDepts].filter(d => d !== "Other").map(d => `<option value="${esc(d)}">`).join("");
 
   const recent = [...S.pub.sales].sort((a, b) => (b.at || "").localeCompare(a.at || "")).slice(0, 8);
@@ -331,6 +334,9 @@ $("resBody").onclick = e => { const b = e.target.closest("[data-undo]"); if (b) 
 function fillSettings(){
   const c = cfg();
   $("cTitle").value = c.title || ""; $("cLede").value = c.lede || ""; $("cCur").value = c.currency || "";
+  $("cHeaderTag").value = c.headerTag || ""; $("cDepts").value = (c.departments || []).join("\n");
+  if (c.logoUrl) { $("logoPreview").src = c.logoUrl; $("logoPreview").hidden = false; $("logoNone").hidden = true; $("logoRm").hidden = false; }
+  else { $("logoPreview").hidden = true; $("logoNone").hidden = false; $("logoRm").hidden = true; }
   $("cPrefix").value = c.prefix || ""; $("cCap").value = c.cap || 0; $("cPer").value = c.perPerson || 0; $("cUrl").value = c.publicUrl || location.host;
   renderBundleRows(bundles().length ? bundles() : [{qty:1, price:0}]);
   const npt = iso => iso ? new Date(new Date(iso).getTime() + 345 * 60000).toISOString().slice(0, 16) : "";
@@ -341,11 +347,20 @@ function fillSettings(){
 }
 $("sub-settings").onsubmit = e => {
   e.preventDefault(); const v = $("cDraw").value;
-  act("config", {title:$("cTitle").value, lede:$("cLede").value, ...(isFin() ? {bundles:readBundleRows(), companyCode:$("cCompany").value} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
+  const departments = $("cDepts").value.split("\n").map(d => d.trim()).filter(Boolean);
+  act("config", {title:$("cTitle").value, lede:$("cLede").value, headerTag:$("cHeaderTag").value, departments,
+    ...(isFin() ? {bundles:readBundleRows(), companyCode:$("cCompany").value} : {}), currency:$("cCur").value, prefix:$("cPrefix").value,
     cap:$("cCap").value, perPerson:$("cPer").value, publicUrl:$("cUrl").value, drawAt:v ? v + ":00+05:45" : null,
     salesCloseAt:$("cClose").value ? $("cClose").value + ":00+05:45" : null,
     selfIssue:{enabled:$("siOn").checked, holdHours:$("siHold").value, maxPer:$("siMax").value}}, "Settings saved");
 };
+$("logoFile").onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  if (file.size > 2 * 1024 * 1024) return toast("That image is over 2 MB. Use a smaller file.");
+  const rd = new FileReader(); rd.onload = () => act("logoUpload", {dataUrl:rd.result}, "Logo uploaded").then(() => { e.target.value = ""; fillSettings(); });
+  rd.readAsDataURL(file);
+};
+$("logoRm").onclick = () => act("logoUpload", {remove:true}, "Logo removed").then(() => fillSettings());
 
 function renderBundleRows(list){
   $("bundleRows").innerHTML = list.map((b, i) => `<div class="brow">

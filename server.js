@@ -30,6 +30,7 @@ const METHODS = ["Cash", "eSewa", "Khalti", "Bank transfer", "Salary deduction",
 const DEFAULT = () => ({
   version: 0,
   config: { title: "Dashain Raffle", lede: "Buy a ticket, fly a kite, win something. Every paid ticket gets an equal chance at every prize.",
+    headerTag: "Company-wide · 2026", departments: [], logo: null,
     price: 200, bundles: [{ qty: 1, price: 200 }, { qty: 3, price: 500 }, { qty: 7, price: 1000 }], currency: "Rs", drawAt: null, prefix: "DSH", cap: 0, perPerson: 0, publicUrl: "raffle.akshyatsharma.com.np" },
   counter: 1, prizes: [], sales: [], batches: [], draws: [], stage: { state: "idle", at: null }, audit: [],
 });
@@ -40,6 +41,9 @@ catch (e) { if (e.code !== "ENOENT") { console.error("cannot read", DB_FILE, e.m
 
 // sales window, self-issue and payment collectors (added after launch; fill in on older data files)
 db.config.salesCloseAt ??= null;
+db.config.headerTag ??= "Company-wide · 2026";
+db.config.departments ??= [];
+db.config.logo ??= null;
 db.config.selfIssue = { enabled: false, code: "", holdHours: 48, maxPer: 21, ...(db.config.selfIssue || {}) };
 // company code: prices and payment collectors are hidden from the public board until a visitor enters it (empty = no gate)
 db.config.companyCode ??= "ODIN2082";
@@ -150,8 +154,8 @@ function unlocked(req) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function publicState(req, force = false) {
-  const open = force || unlocked(req), { companyCode, ...cfg } = db.config;
-  const config = { ...cfg, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) };
+  const open = force || unlocked(req), { companyCode, logo, ...cfg } = db.config;
+  const config = { ...cfg, logoUrl: logo ? "/uploads/" + logo : null, selfIssue: { enabled: !!db.config.selfIssue.enabled, holdHours: db.config.selfIssue.holdHours, maxPer: db.config.selfIssue.maxPer }, collectors: db.config.collectors.map(collectorPublic) };
   if (!open) { delete config.bundles; delete config.price; config.collectors = []; }
   return {
     version: db.version, prizes: db.prizes, salesOpen: salesOpen(), locked: !open, gated: gateOn(),
@@ -165,7 +169,7 @@ function stagePublic() {
   const st = db.stage; if (st.state !== "revealed") return st;
   const s = saleFor(st.ticket); return { ...st, name: s ? publicName(s) : "", dept: s && !s.anon ? s.dept : "" };
 }
-function adminState() { return { ...db, config: { ...db.config, collectors: db.config.collectors.map(c => ({ ...c, qrUrl: c.qr ? "/uploads/" + c.qr : null })) }, salesOpen: salesOpen(), stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
+function adminState() { return { ...db, config: { ...db.config, logoUrl: db.config.logo ? "/uploads/" + db.config.logo : null, collectors: db.config.collectors.map(c => ({ ...c, qrUrl: c.qr ? "/uploads/" + c.qr : null })) }, salesOpen: salesOpen(), stage: stagePublic(), inDraw: eligible().length, audit: db.audit.slice(-200) }; }
 
 /* ---------------- sessions ---------------- */
 const sign = v => crypto.createHmac("sha256", SESSION_SECRET).update(v).digest("base64url");
@@ -297,8 +301,13 @@ const actions = {
       .map(x => ({ qty: int(x.qty, 1, 100), price: int(x.price, 0, 1e7) })).filter(x => !seen.has(x.qty) && seen.add(x.qty)).sort((x, y) => x.qty - y.qty);
     if (b.bundles === undefined) bundles.push(...c.bundles);
     if (!bundles.length || bundles[0].qty !== 1) throw bad("Set a price for a single ticket so any number of tickets can be sold");
+    const departments = Array.isArray(b.departments)
+      ? [...new Set(b.departments.map(d => str(d, 40)).filter(Boolean))].slice(0, 40)
+      : c.departments;
     Object.assign(c, {
-      title: str(b.title, 60) || "Dashain Raffle", lede: str(b.lede, 160), bundles, price: bundles[0].price, currency: str(b.currency, 6),
+      title: str(b.title, 60) || "Dashain Raffle", lede: str(b.lede, 160),
+      headerTag: b.headerTag === undefined ? c.headerTag : str(b.headerTag, 60), departments,
+      bundles, price: bundles[0].price, currency: str(b.currency, 6),
       prefix: (str(b.prefix, 5).toUpperCase().replace(/[^A-Z0-9]/g, "") || "T"), cap: int(b.cap, 0, 100000), perPerson: int(b.perPerson, 0, 10000),
       drawAt: b.drawAt && !isNaN(Date.parse(b.drawAt)) ? new Date(b.drawAt).toISOString() : null, publicUrl: str(b.publicUrl, 80) || c.publicUrl,
       salesCloseAt: b.salesCloseAt && !isNaN(Date.parse(b.salesCloseAt)) ? new Date(b.salesCloseAt).toISOString() : null,
@@ -343,6 +352,18 @@ const actions = {
     fs.writeFileSync(path.join(UPLOAD_DIR, file), buf);
     if (c.qr) fs.rm(path.join(UPLOAD_DIR, c.qr), () => {});
     c.qr = file; audit(who.name, `uploaded QR for ${c.name}`); return { qr: "/uploads/" + file };
+  },
+  logoUpload(b, who) {
+    const c = db.config;
+    if (b.remove) { if (c.logo) fs.rm(path.join(UPLOAD_DIR, c.logo), () => {}); c.logo = null; audit(who.name, "removed company logo"); return {}; }
+    const m = String(b.dataUrl || "").match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/); if (!m) throw bad("Upload a PNG, JPG or WebP image");
+    const buf = Buffer.from(m[2], "base64"); if (buf.length > 2 * 1024 * 1024) throw bad("That image is over 2 MB. Use a smaller file.");
+    const sig = { png: [0x89, 0x50, 0x4e, 0x47], jpeg: [0xff, 0xd8, 0xff], webp: [0x52, 0x49, 0x46, 0x46] }[m[1]];
+    if (!sig.every((v, i) => buf[i] === v)) throw bad("That file isn't a valid image");
+    const file = `logo-${crypto.randomBytes(4).toString("hex")}.${m[1] === "jpeg" ? "jpg" : m[1]}`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, file), buf);
+    if (c.logo) fs.rm(path.join(UPLOAD_DIR, c.logo), () => {});
+    c.logo = file; audit(who.name, "uploaded company logo"); return { logo: "/uploads/" + file };
   },
   draw(b, who) {
     if (db.stage.state === "rolling") throw bad("A draw is already in progress", 409);
@@ -438,7 +459,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: db.version });
     if (url.pathname.startsWith("/uploads/")) {
-      const f = url.pathname.slice(9); if (!/^qr-c-[a-z0-9-]+\.(png|jpg|webp)$/.test(f)) return send(res, 404, { error: "Not found" });
+      const f = url.pathname.slice(9); if (!/^(qr-c-[a-z0-9-]+|logo-[a-z0-9]+)\.(png|jpg|webp)$/.test(f)) return send(res, 404, { error: "Not found" });
       return fs.readFile(path.join(UPLOAD_DIR, f), (err, buf) => {
         if (err) return send(res, 404, { error: "Not found" });
         res.writeHead(200, { "content-type": { png: "image/png", jpg: "image/jpeg", webp: "image/webp" }[f.split(".").pop()], "cache-control": "public, max-age=86400, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'" });
@@ -492,7 +513,7 @@ const server = http.createServer(async (req, res) => {
     const name = url.pathname.replace("/api/admin/", "");
     const fn = Object.hasOwn(actions, name) ? actions[name] : null;
     if (!fn) return send(res, 404, { error: "Not found" });
-    const result = fn(await body(req, name === "collectorQr" ? 3 * 1024 * 1024 : 64 * 1024), session);
+    const result = fn(await body(req, name === "collectorQr" || name === "logoUpload" ? 3 * 1024 * 1024 : 64 * 1024), session);
     save();
     return send(res, 200, { ok: true, ...result });
   } catch (e) {
