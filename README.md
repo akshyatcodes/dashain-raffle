@@ -20,17 +20,42 @@ Guides:
 
 ## Quick start (Docker)
 
+**Prerequisites:** Docker + Docker Compose v2. That's it — no database, no npm install, no build tooling.
+
+1. **Clone and enter the repo:**
+   ```bash
+   git clone https://github.com/akshyatcodes/dashain-raffle.git raffle && cd raffle
+   ```
+2. **Create your secrets** — copy the template and generate three values:
+   ```bash
+   cp .env.example .env
+   echo "RAFFLE_ADMIN_PASSWORD=$(openssl rand -base64 18)"    >> .env
+   echo "RAFFLE_FINANCE_PASSWORD=$(openssl rand -base64 18)"  >> .env
+   echo "RAFFLE_SESSION_SECRET=$(openssl rand -hex 32)"       >> .env
+   chmod 600 .env
+   ```
+   Open `.env` and check each `RAFFLE_*` line only has one value (the `echo` above appends — remove the original blank line for that variable if you kept it). Never commit this file.
+3. **Set up the compose file:**
+   ```bash
+   cp docker-compose.example.yml docker-compose.yml
+   ```
+   Edit it if you want a named volume instead of a bind mount, or to add Traefik labels (see the commented-out block inside).
+4. **Start it:**
+   ```bash
+   docker compose up -d --build
+   curl -s http://127.0.0.1:8080/healthz     # {"ok":true,...}
+   ```
+5. **Put HTTPS in front of it.** Use Traefik, nginx, Caddy, or your platform's ingress, pointed at container port 8080. Don't expose 8080 to the internet directly — see [Reverse proxy notes](#reverse-proxy-notes) below (SSE buffering matters).
+6. **First sign-in:** open `https://your-host/`, go to **Organisers**, and sign in with the **finance** password first (finance can configure everything; organiser can't). Then work through the [first-time setup checklist](docs/ORGANISER-GUIDE.md#first-time-setup) — event name, prizes, dates, payment collectors, company code.
+7. **Smoke test:** sign in as finance in one browser, open the public board in another, record a test sale, confirm it appears live, then void it.
+
+For a step-by-step deployment/handover checklist (including backups, upgrades, moving servers, and troubleshooting), see [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+**Without Docker** (Node 20+):
 ```bash
-git clone <this repo> raffle && cd raffle
-cp .env.example .env            # fill in the three values (see below), then: chmod 600 .env
-cp docker-compose.example.yml docker-compose.yml
-docker compose up -d --build
-curl -s http://127.0.0.1:8080/healthz     # {"ok":true,...}
+npm run check   # syntax check, no dependencies to install
+RAFFLE_ADMIN_PASSWORD=… RAFFLE_FINANCE_PASSWORD=… RAFFLE_SESSION_SECRET=… DATA_DIR=./data node server.js
 ```
-
-Put a TLS reverse proxy (Traefik, nginx, Caddy or your company ingress) in front of port 8080 and open `https://your-host/`. Sign in under **Organisers** with the finance password first, then work through the [first-time setup checklist](docs/ORGANISER-GUIDE.md#first-time-setup).
-
-Without Docker, use Node 20 or later: `RAFFLE_ADMIN_PASSWORD=… RAFFLE_FINANCE_PASSWORD=… RAFFLE_SESSION_SECRET=… DATA_DIR=./data node server.js`
 
 ## Configuration
 
@@ -97,3 +122,7 @@ docs/                     guides
 ```
 
 Check syntax before shipping a change: `npm run check`
+
+## License
+
+MIT — see [LICENSE](LICENSE). Use it, fork it, adapt it for your own event.
